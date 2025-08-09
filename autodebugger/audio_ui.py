@@ -29,7 +29,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
-from .db import DEFAULT_DB_PATH
+from .db import DEFAULT_DB_PATH, LineReportStore
 
 
 class MacSayTTS:
@@ -86,89 +86,13 @@ class MacSayTTS:
             self._proc = None
 
 
-class VoiceRecognizer:
-    """Optional macOS voice recognizer using NSSpeechRecognizer via PyObjC.
-
-    If not available, it becomes a no-op and never emits commands.
-    """
-
+class VoiceRecognizer:  # Legacy placeholder; voice input disabled per design
     def __init__(self, commands: Iterable[str], listens_in_foreground_only: bool = False) -> None:
         self.available = False
-        self._cmd_queue: "queue.Queue[str]" = queue.Queue()
-        self._thread: Optional[threading.Thread] = None
-        self._should_stop = threading.Event()
-        self._commands = list(commands)
-
-        try:
-            import AppKit  # type: ignore
-            import Foundation  # type: ignore
-            import objc  # type: ignore
-            from Foundation import NSObject  # type: ignore
-
-            self._objc = objc
-            self._AppKit = AppKit
-            self._Foundation = Foundation
-            self._NSObject = NSObject
-
-            class _Delegate(NSObject):  # type: ignore
-                def initWithQueue_(self, q):  # type: ignore
-                    self = objc.super(_Delegate, self).init()
-                    if self is None:
-                        return None
-                    self.q = q
-                    return self
-
-                def speechRecognizer_didRecognizeCommand_(self, sender, command):  # type: ignore
-                    try:
-                        cmd = str(command)
-                        self.q.put(cmd)
-                    except Exception:
-                        pass
-
-            self._Delegate = _Delegate
-            self.available = True
-            self._recognizer = None
-            self._delegate = None
-
-            def _runner():
-                pool = self._Foundation.NSAutoreleasePool.alloc().init()
-                try:
-                    recognizer = self._AppKit.NSSpeechRecognizer.alloc().init()
-                    delegate = self._Delegate.alloc().initWithQueue_(self._cmd_queue)
-                    recognizer.setDelegate_(delegate)
-                    recognizer.setListensInForegroundOnly_(listens_in_foreground_only)
-                    recognizer.setBlocksOtherRecognizers_(True)
-                    recognizer.setCommands_(self._commands)
-                    recognizer.startListening()
-                    self._recognizer = recognizer
-                    self._delegate = delegate
-
-                    run_loop = self._Foundation.NSRunLoop.currentRunLoop()
-                    while not self._should_stop.is_set():
-                        run_loop.runUntilDate_(self._Foundation.NSDate.dateWithTimeIntervalSinceNow_(0.1))
-                finally:
-                    try:
-                        if self._recognizer is not None:
-                            self._recognizer.stopListening()
-                    except Exception:
-                        pass
-                    del pool
-
-            self._thread = threading.Thread(target=_runner, daemon=True)
-            self._thread.start()
-        except Exception:
-            self.available = False
-
     def get_command_nowait(self) -> Optional[str]:
-        try:
-            return self._cmd_queue.get_nowait()
-        except queue.Empty:
-            return None
-
+        return None
     def stop(self) -> None:
-        self._should_stop.set()
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=1.0)
+        pass
 
 
 @dataclass
@@ -234,6 +158,18 @@ def iter_line_reports(conn: sqlite3.Connection, session_id: str) -> Iterable[Dic
         yield rec
 
 
+def _update_observations(conn: sqlite3.Connection, line_id: Any, note: str) -> None:
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE line_reports SET observations = COALESCE(observations,'') || ? WHERE id=?",
+            ("\n" + note if note else note, line_id),
+        )
+        conn.commit()
+    except Exception:
+        pass
+
+
 NUM_WORDS = {
     "zero": 0,
     "one": 1,
@@ -249,30 +185,52 @@ NUM_WORDS = {
 
 
 class InputManager:
-    def __init__(self, enable_voice: bool) -> None:
-        commands = list(NUM_WORDS.keys()) + [str(i) for i in range(10)] + ["okay", "next"]
-        self.recognizer = VoiceRecognizer(commands) if enable_voice else None
+    def __init__(self) -> None:
+        self._queue: "queue.Queue[str]" = queue.Queue()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._reader_loop, daemon=True)
+        self._thread.start()
 
-    def read_command(self, timeout: float) -> Optional[str]:
-        if self.recognizer and self.recognizer.available:
-            t_end = time.time() + timeout
-            while time.time() < t_end:
-                cmd = self.recognizer.get_command_nowait()
-                if cmd:
-                    return cmd.strip().lower()
+    def _reader_loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                line = sys.stdin.readline()
+                if not line:
+                    time.sleep(0.05)
+                    continue
+                self._queue.put(line.strip())
+            except Exception:
                 time.sleep(0.05)
+
+    def get_line_nowait(self) -> Optional[str]:
         try:
-            rlist, _, _ = select.select([sys.stdin], [], [], timeout)
-            if rlist:
-                data = sys.stdin.readline().strip().lower()
-                return data
-        except Exception:
-            pass
-        return None
+            return self._queue.get_nowait()
+        except queue.Empty:
+            return None
+
+    def wait_for_line(self, predicate: Optional[Iterable[str]] = None) -> str:
+        while True:
+            try:
+                line = self._queue.get(timeout=0.05)
+                if not predicate:
+                    return line
+                # If predicate is an iterable of allowed strings
+                if isinstance(predicate, (list, tuple, set)):
+                    if line in predicate:
+                        return line
+                else:
+                    return line
+            except queue.Empty:
+                if self._stop.is_set():
+                    return ""
 
     def stop(self) -> None:
-        if self.recognizer:
-            self.recognizer.stop()
+        self._stop.set()
+        if self._thread.is_alive():
+            try:
+                self._thread.join(timeout=1.0)
+            except Exception:
+                pass
 
 
 def summarize_delta(delta: Dict[str, Any], max_len: int = 120) -> str:
@@ -334,7 +292,8 @@ def paginate_sessions(conn: sqlite3.Connection, tts: MacSayTTS, input_mgr: Input
         speak_session_page(tts, sessions, page)
 
         while True:
-            cmd = input_mgr.read_command(timeout=8.0)
+            # Poll typed lines without blocking TTS
+            cmd = input_mgr.get_line_nowait()
             if cmd is None:
                 if page == 0:
                     tts.speak("Selecting item zero by default")
@@ -369,7 +328,7 @@ def paginate_sessions(conn: sqlite3.Connection, tts: MacSayTTS, input_mgr: Input
             if cmd in ("quit", "exit", "q"):
                 tts.speak("Goodbye")
                 return None
-            tts.speak("Say a number, okay, or next")
+            tts.speak("Type a number, 'okay', or 'next'")
 
 
 def autoplay_session(
@@ -383,6 +342,7 @@ def autoplay_session(
     for rec in iter_line_reports(conn, session.session_id):
         code = rec.get("code") or ""
         line_no = rec.get("line_number")
+        line_id = rec.get("id")
         delta = rec.get("variables_delta") or {}
         status = rec.get("status") or "success"
         err = rec.get("error_message") if status == "error" else None
@@ -394,15 +354,17 @@ def autoplay_session(
             text = prefix + "no code captured"
         tts.speak(text, interrupt=True)
 
-        # While speaking, allow 'next'/'n' to skip or 'q' to quit
+        # While speaking, user can type notes freely. They are captured once Enter is pressed.
+        # After speech completes, wait for an explicit 'next' to move on. Any other submitted
+        # line is recorded as an observation for this line and we continue waiting.
         while tts.is_speaking():
-            cmd = input_mgr.read_command(timeout=0.05)
-            if not cmd:
-                continue
-            if cmd in ("next", "n"):
-                tts.stop()
-                break
-            if cmd in ("quit", "q", "exit"):
+            note = input_mgr.get_line_nowait()
+            if note not in (None, "", "next", "n"):
+                try:
+                    _update_observations(conn, line_id, note)
+                except Exception:
+                    pass
+            if note in ("quit", "q", "exit"):
                 tts.speak("Stopping playback", interrupt=True)
                 return
 
@@ -418,16 +380,19 @@ def autoplay_session(
             else:
                 tts.speak("An error occurred")
 
-        t_end = time.time() + delay_s
-        while time.time() < t_end:
-            cmd = input_mgr.read_command(timeout=0.05)
-            if not cmd:
-                continue
-            if cmd in ("next", "n"):
+        # Now wait until user submits 'next' (Enter), capturing any note lines meanwhile
+        while True:
+            cmd_or_note = input_mgr.wait_for_line()
+            if cmd_or_note in ("next", "n"):
                 break
-            if cmd in ("quit", "q", "exit"):
+            if cmd_or_note in ("quit", "q", "exit"):
                 tts.speak("Stopping playback", interrupt=True)
                 return
+            if cmd_or_note:
+                try:
+                    _update_observations(conn, line_id, cmd_or_note)
+                except Exception:
+                    pass
 
     tts.speak("End of session")
 
@@ -441,7 +406,7 @@ def run_audio_interface(
     verbose: bool = False,
 ) -> int:
     tts = MacSayTTS(voice=voice, rate_wpm=rate_wpm, verbose=verbose)
-    input_mgr = InputManager(enable_voice=enable_voice)
+    input_mgr = InputManager()
 
     def _sigint(_sig, _frm):
         try:
