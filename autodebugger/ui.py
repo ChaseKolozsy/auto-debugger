@@ -10,19 +10,25 @@ from .db import LineReportStore
 def create_app(db_path: Optional[str] = None) -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
 
-    store = LineReportStore(db_path)
-    store.open()
+    # Use one connection per request to avoid cross-thread issues
+    def get_store() -> LineReportStore:
+        s = LineReportStore(db_path)
+        s.open()
+        return s
 
-    @app.teardown_appcontext
+    @app.teardown_request
     def _close_db(_exc: Optional[BaseException]) -> None:
-        try:
-            store.close()
-        except Exception:
-            pass
+        st = getattr(app, '_req_store', None)
+        if st:
+            try:
+                st.close()
+            except Exception:
+                pass
 
     @app.route("/")
     def index():
         # List sessions sorted by updated time desc
+        store = get_store(); app._req_store = store  # type: ignore[attr-defined]
         conn = store.conn
         assert conn is not None
         cur = conn.cursor()
@@ -61,6 +67,7 @@ def create_app(db_path: Optional[str] = None) -> Flask:
             "SELECT session_id, file, language, start_time, end_time, total_lines_executed, successful_lines, lines_with_errors, total_crashes, updated_at "
             f"FROM session_summaries {where} ORDER BY updated_at DESC"
         )
+        store = get_store(); app._req_store = store  # type: ignore[attr-defined]
         conn = store.conn
         assert conn is not None
         cur = conn.cursor()
@@ -85,6 +92,7 @@ def create_app(db_path: Optional[str] = None) -> Flask:
 
     @app.route("/session/<session_id>")
     def session_detail(session_id: str):
+        store = get_store(); app._req_store = store  # type: ignore[attr-defined]
         conn = store.conn
         assert conn is not None
         cur = conn.cursor()
