@@ -9,6 +9,24 @@ Usage
 - Run: `autodebug run path/to/script.py [-- args...]`
 - Export JSON: `autodebug export --db .autodebug/line_reports.db --session <id>`
 
+Manual stepping mode
+- Interactive debugging: `autodebug run --manual path/to/script.py`
+  - Step through code line-by-line with manual control
+  - Press Enter to step, 'a' for auto mode, 'c' to continue, 'q' to quit
+- Web interface: `autodebug run --manual --manual-web path/to/script.py`
+  - Opens a web UI at `http://127.0.0.1:PORT` with Step/Auto/Continue/Quit buttons
+  - Real-time display of current file, line number, and code
+  - Keyboard shortcuts: Enter (step), a (auto), c (continue), q (quit)
+- Conditional activation: `autodebug run --manual --manual-from path/to/file.py:123 path/to/script.py`
+  - Starts in automatic mode and switches to manual when reaching the specified file:line
+  - Useful for debugging specific sections without stepping through initialization code
+- Audio feedback: `autodebug run --manual --manual-audio --manual-voice Samantha --manual-rate 210 path/to/script.py`
+  - Announces current line and code via macOS text-to-speech
+  - Speaks variable values and changes at each step
+  - Configurable voice and speech rate
+- Combined features: `autodebug run --manual --manual-web --manual-audio --manual-from path/to/file.py:50 path/to/script.py`
+  - Use all features together for maximum control and accessibility
+
 Audio review (macOS)
 - Review sessions with audio + typing: `autodebug audio --db .autodebug/line_reports.db`
 - Options: `--voice <name>` (omit to use system default), `--rate 210`, `--delay 0.4`, `--verbose`, `--mode {manual,auto}`, `--recite-func {off,sig,full}`, `--no-scope`
@@ -35,6 +53,15 @@ MCP server (agents)
   - `getLineReport(db, id)`: full record including variables and deltas
   - `getCrashes(db, sessionId)`: error lines
   - `getFunctionContext(db, sessionId, file, line, mode={sig|full})`: signature/body from snapshot/commit/disk
+
+Completed Features
+- Manual stepping mode with web interface and conditional activation
+  - ✅ Interactive line-by-line stepping with keyboard controls
+  - ✅ Web UI with real-time state display and control buttons
+  - ✅ Conditional activation at specific file:line locations (--manual-from)
+  - ✅ Audio announcements for current line and variable changes
+  - ✅ Seamless switching between manual and auto modes during execution
+  - ✅ Prevention of reactivation after mode switching
 
 Roadmap / TODOs
 - Audio UI
