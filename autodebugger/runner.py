@@ -707,6 +707,10 @@ class AutoDebugger:
                             # Continue execution to reach the trigger line
                             if not manual_trigger_activated:
                                 client.request("continue", {"threadId": thread_id})
+                            else:
+                                # We've activated manual from trigger, now we should be in manual mode
+                                # This shouldn't happen - if we activated, we should be in manual_mode_active
+                                pass
 
                     elif ev.event == "continued":
                         # ignore

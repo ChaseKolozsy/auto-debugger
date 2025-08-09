@@ -1,18 +1,12 @@
 #!/usr/bin/env python3
-"""Direct test of manual-from feature."""
+"""Test running debugger directly."""
 
 from autodebugger.runner import AutoDebugger
 
-print("Creating debugger...")
+print("[TEST] Creating AutoDebugger")
 dbg = AutoDebugger()
 
-print("Starting run with manual-from...")
-session_id = dbg.run(
-    "test_simple.py",
-    manual=True,
-    manual_from="test_simple.py:8",
-    manual_web=True,
-    stop_on_entry=False
-)
+print("[TEST] Calling run()")
+session_id = dbg.run("test_simple.py", just_my_code=True, stop_on_entry=True)
 
-print(f"Session completed: {session_id}")
+print(f"[TEST] Session ID: {session_id}")
