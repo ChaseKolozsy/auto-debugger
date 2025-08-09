@@ -158,11 +158,14 @@ class SharedState:
             return self._current_state.copy()
     
     def send_action(self, action: str):
+        print(f"[DEBUG SharedState] Queueing action: {action}", flush=True)
         self._action_queue.put(action)
     
     def get_action(self, timeout: Optional[float] = None) -> Optional[str]:
         try:
-            return self._action_queue.get(timeout=timeout)
+            action = self._action_queue.get(timeout=timeout)
+            print(f"[DEBUG SharedState] Retrieved action: {action}", flush=True)
+            return action
         except queue.Empty:
             return None
     
@@ -215,6 +218,7 @@ class StepControlHandler(BaseHTTPRequestHandler):
     
     def do_GET(self):
         if self.path == "/state":
+            # Don't log state requests as they happen every 500ms
             self._send(200, self.shared.get_state())
         elif self.path == "/" or self.path.startswith("/index.html"):
             html = """<!doctype html>
@@ -712,6 +716,7 @@ class StepControlHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get('Content-Length', 0))
             data = json.loads(self.rfile.read(length))
             action = data.get('action', '')
+            print(f"[DEBUG Handler] Received command: {action}", flush=True)
             if action in ['step', 'auto', 'continue', 'quit']:
                 self.shared.send_action(action)
                 self._send(200, {"status": "ok", "action": action})
