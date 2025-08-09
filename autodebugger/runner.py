@@ -15,8 +15,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import debugpy
 
-# Temporarily use basic control to test if enhanced is causing issues
-USE_ENHANCED = False
+# Re-enable enhanced control to fix the issues
+USE_ENHANCED = True
 if USE_ENHANCED:
     try:
         from .enhanced_control import HttpStepController, prompt_for_action
@@ -117,15 +117,18 @@ class AutoDebugger:
         
         # Setup manual control interfaces
         manual_mode_active = manual and not manual_from  # Start in manual if no trigger
+        
+        # Initialize TTS first if audio is enabled
+        if manual_audio:
+            self._tts = MacSayTTS(voice=manual_voice, rate_wpm=manual_rate_wpm, verbose=False)
+        
         if manual_web:
-            self._controller = HttpStepController()
+            # Pass TTS instance to controller if available
+            self._controller = HttpStepController(tts=self._tts) if self._tts else HttpStepController()
             self._controller.start()
             # Set initial audio state if controller supports it
             if hasattr(self._controller, 'set_audio_state'):
                 self._controller.set_audio_state(enabled=manual_audio, available=manual_audio)
-        
-        if manual_audio:
-            self._tts = MacSayTTS(voice=manual_voice, rate_wpm=manual_rate_wpm, verbose=False)
         # Detect git provenance
         git_root: Optional[str] = None
         git_commit: Optional[str] = None

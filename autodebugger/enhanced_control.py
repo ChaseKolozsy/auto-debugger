@@ -30,6 +30,25 @@ def extract_function_context(file_path: str, line: int) -> Dict[str, Any]:
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             source = f.read()
+        
+        # Quick check: if line is too early for any function, skip AST parsing
+        lines = source.splitlines()
+        if line <= 1 or line > len(lines):
+            return {"name": None, "sig": None, "body": None}
+        
+        # Only parse if we're likely in a function (heuristic check)
+        # Look for 'def ' or 'class ' in previous lines
+        found_def = False
+        for i in range(max(0, line - 50), line):
+            if i < len(lines):
+                stripped = lines[i].strip()
+                if stripped.startswith(('def ', 'async def ', 'class ')):
+                    found_def = True
+                    break
+        
+        if not found_def:
+            return {"name": None, "sig": None, "body": None}
+        
         tree = ast.parse(source, filename=file_path)
     except Exception:
         return {"name": None, "sig": None, "body": None}
@@ -116,18 +135,60 @@ class SharedState:
             "audio_enabled": False,  # Will be set based on --manual-audio flag
             "audio_available": False  # Will be set if TTS is available
         }
+        self._function_cache = {}  # Cache function contexts by (file, line)
+        self._extraction_thread = None
     
     def update_state(self, **kwargs):
+        # Check if we need to extract function context
+        needs_extraction = False
+        file_path = kwargs.get("file")
+        line = kwargs.get("line", 0)
+        
         with self._lock:
-            # Extract function context if file and line are provided
-            if "file" in kwargs and "line" in kwargs and kwargs["line"] > 0:
-                func_context = extract_function_context(kwargs["file"], kwargs["line"])
-                kwargs.update({
-                    "function_name": func_context["name"],
-                    "function_sig": func_context["sig"],
-                    "function_body": func_context["body"]
-                })
             self._current_state.update(kwargs)
+            
+            # Check if file/line changed and we need extraction
+            if file_path and line > 0:
+                cache_key = (file_path, line)
+                if cache_key not in self._function_cache:
+                    needs_extraction = True
+                else:
+                    # Use cached result
+                    cached = self._function_cache[cache_key]
+                    self._current_state.update(cached)
+        
+        # Extract function context outside the lock
+        if needs_extraction:
+            self._async_extract_function(file_path, line)
+    
+    def _async_extract_function(self, file_path: str, line: int):
+        """Extract function context in a separate thread to avoid blocking."""
+        def extract():
+            try:
+                func_context = extract_function_context(file_path, line)
+                cache_key = (file_path, line)
+                
+                with self._lock:
+                    # Cache the result
+                    self._function_cache[cache_key] = {
+                        "function_name": func_context["name"],
+                        "function_sig": func_context["sig"],
+                        "function_body": func_context["body"]
+                    }
+                    
+                    # Update state if we're still on the same file/line
+                    if (self._current_state.get("file") == file_path and 
+                        self._current_state.get("line") == line):
+                        self._current_state.update(self._function_cache[cache_key])
+            except Exception:
+                pass  # Silently fail extraction
+        
+        # Cancel previous extraction if still running
+        if self._extraction_thread and self._extraction_thread.is_alive():
+            return  # Skip if previous extraction still running
+        
+        self._extraction_thread = threading.Thread(target=extract, daemon=True)
+        self._extraction_thread.start()
     
     def get_state(self) -> Dict[str, Any]:
         with self._lock:
@@ -467,7 +528,8 @@ class StepControlHandler(BaseHTTPRequestHandler):
                     <li><b>a</b> - Switch to auto mode</li>
                     <li><b>c</b> - Continue execution</li>
                     <li><b>q</b> - Quit debugging</li>
-                    <li><b>f</b> - Toggle function context</li>
+                    <li><b>x</b> - Toggle function context</li>
+                    <li><b>m</b> - Toggle audio mute/unmute</li>
                 </ul>
             </div>
         </div>
@@ -601,8 +663,26 @@ class StepControlHandler(BaseHTTPRequestHandler):
         }
         
         function toggleFunction() {
+            console.log('toggleFunction called');
             const ctx = document.getElementById('functionContext');
+            console.log('Got element:', ctx);
             ctx.classList.toggle('visible');
+            console.log('Toggle complete, visible:', ctx.classList.contains('visible'));
+            
+            // If audio is enabled and function context exists, read it aloud
+            if (currentState.audio_enabled && currentState.function_name) {
+                readFunctionContext();
+            }
+        }
+        
+        function readFunctionContext() {
+            // Fire and forget - don't await
+            fetch('/read-function', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'}
+            }).catch(e => {
+                console.error('Failed to read function context:', e);
+            });
         }
         
         async function toggleAudio() {
@@ -643,8 +723,10 @@ class StepControlHandler(BaseHTTPRequestHandler):
                 sendAction('continue');
             } else if (e.key === 'q' || e.key === 'Q') {
                 sendAction('quit');
-            } else if (e.key === 'f' || e.key === 'F') {
+            } else if (e.key === 'x' || e.key === 'X') {
                 toggleFunction();
+            } else if (e.key === 'm' || e.key === 'M') {
+                toggleAudio();
             }
         });
         
@@ -671,6 +753,52 @@ class StepControlHandler(BaseHTTPRequestHandler):
         elif self.path == "/toggle-audio":
             new_state = self.shared.toggle_audio()
             self._send(200, {"status": "ok", "audio_enabled": new_state})
+        elif self.path == "/read-function":
+            # Read function context aloud
+            state = self.shared.get_state()
+            if state.get('function_name') and state.get('audio_enabled'):
+                # Build the full function text to read
+                func_text = f"In function {state['function_name']}"
+                
+                # Add the signature
+                if state.get('function_sig'):
+                    func_text += f". Signature: {state['function_sig']}"
+                
+                # Add the function body (limit to prevent very long reads)
+                if state.get('function_body'):
+                    body = state['function_body']
+                    # Limit body to first 200 chars to avoid blocking too long
+                    if len(body) > 200:
+                        body = body[:200] + "..."
+                    func_text += f". Body: {body}"
+                
+                # Use subprocess directly to avoid TTS lock conflicts
+                # This bypasses the shared TTS instance completely
+                import subprocess
+                import threading
+                
+                def speak_directly():
+                    try:
+                        # Get voice settings from TTS if available
+                        tts = getattr(self.server, 'tts', None)
+                        voice = getattr(tts, 'voice', None) if tts else None
+                        rate_wpm = getattr(tts, 'rate_wpm', 210) if tts else 210
+                        
+                        args = ["say"]
+                        if voice:
+                            args += ["-v", voice]
+                        args += ["-r", str(rate_wpm), func_text]
+                        
+                        # Run say command directly without going through TTS instance
+                        subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    except Exception:
+                        pass  # Silently fail if TTS unavailable
+                
+                # Speak in a separate thread without using the shared TTS instance
+                threading.Thread(target=speak_directly, daemon=True).start()
+                self._send(200, {"status": "ok", "spoken": func_text[:100] + "..."})
+            else:
+                self._send(200, {"status": "ok", "message": "No function context or audio disabled"})
         else:
             self.send_error(404)
     
@@ -685,16 +813,18 @@ class StepControlHandler(BaseHTTPRequestHandler):
 class HttpStepController:
     """HTTP server for manual step control."""
     
-    def __init__(self, port: Optional[int] = None):
+    def __init__(self, port: Optional[int] = None, tts: Optional[Any] = None):
         self.port = port or find_free_port()
         self.shared_state = SharedState()
         self.server: Optional[HTTPServer] = None
         self.thread: Optional[threading.Thread] = None
+        self.tts = tts
     
     def start(self):
         """Start the HTTP server in a background thread."""
         self.server = HTTPServer(('127.0.0.1', self.port), StepControlHandler)
         self.server.shared_state = self.shared_state  # type: ignore
+        self.server.tts = self.tts  # type: ignore
         
         def run_server():
             try:
