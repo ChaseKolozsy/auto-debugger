@@ -48,9 +48,24 @@ class MacSayTTS:
     def speak(self, text: str, interrupt: bool = False) -> None:
         if not text:
             return
+        proc_to_stop = None
         with self._lock:
             if interrupt and self._proc and self._proc.poll() is None:
-                self.stop()
+                # Don't call stop() while holding the lock - it needs the lock too!
+                proc_to_stop = self._proc
+                self._proc = None
+        # Stop outside the lock to avoid deadlock
+        if proc_to_stop:
+            try:
+                proc_to_stop.terminate()
+                proc_to_stop.wait(timeout=0.2)
+            except Exception:
+                try:
+                    proc_to_stop.kill()
+                except Exception:
+                    pass
+        
+        with self._lock:
             # If a previous utterance is still playing and we are not interrupting, wait for it
             if not interrupt and self._proc and self._proc.poll() is None:
                 try:

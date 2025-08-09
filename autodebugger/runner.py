@@ -393,8 +393,9 @@ class AutoDebugger:
                                         just_activated_manual = True  # Mark that we just activated
                                         if self._controller:
                                             self._controller.update_state(mode='manual')
-                                        if self._tts:
-                                            self._tts.speak(f"Manual mode activated at line {line_check}", interrupt=True)
+                                        # Temporarily disable TTS on activation to test if this causes the hang
+                                        # if self._tts:
+                                        #     self._tts.speak(f"Manual mode activated at line {line_check}", interrupt=True)
                                         print(f"\n[manual] Activated at {os.path.basename(file_check)}:{line_check}\n", flush=True)
                         
                         # Query stack, scopes, variables
