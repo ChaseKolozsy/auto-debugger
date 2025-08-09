@@ -222,17 +222,70 @@ def create_app(db_path: Optional[str] = None) -> Flask:
                     return info.get("qual")
             return None
 
-        def function_detail_for_line(pyfile: str, line: int) -> Tuple[_Optional[str], _Optional[str]]:
-            if not pyfile or not os.path.isfile(pyfile):
+        def function_detail_for_line(pyfile: str, line: int, repo_root: _Optional[str], commit: _Optional[str]) -> Tuple[_Optional[str], _Optional[str]]:
+            # Prefer reading the file content from git at the recorded commit
+            source: _Optional[str] = None
+            if repo_root and commit and os.path.abspath(pyfile).startswith(os.path.abspath(repo_root)):
+                rel = os.path.relpath(pyfile, repo_root)
+                try:
+                    import subprocess as _sp
+                    show = _sp.run(["git", "show", f"{commit}:{rel}"], cwd=repo_root, capture_output=True)
+                    if show.returncode == 0:
+                        source = show.stdout.decode("utf-8", errors="replace")
+                except Exception:
+                    source = None
+            # Fallback to disk
+            if source is None:
+                try:
+                    with open(pyfile, "r", encoding="utf-8") as f:
+                        source = f.read()
+                except Exception:
+                    source = None
+            if not source:
                 return None, None
-            if pyfile not in function_maps:
-                function_maps[pyfile] = build_function_ranges(pyfile)
-            for info in function_maps.get(pyfile, []):
+            try:
+                tree = ast.parse(source, filename=pyfile)
+            except Exception:
+                return None, None
+
+            # Recompute ranges for this file based on the chosen source
+            infos: List[FnInfo] = []
+            stack: List[str] = []
+            class Visitor(ast.NodeVisitor):
+                def visit_ClassDef(self, node: ast.ClassDef) -> None:  # type: ignore[override]
+                    stack.append(node.name)
+                    self.generic_visit(node)
+                    stack.pop()
+                def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # type: ignore[override]
+                    qual = ".".join(stack + [node.name]) if stack else node.name
+                    start = getattr(node, "lineno", None)
+                    end = getattr(node, "end_lineno", None)
+                    if isinstance(start, int) and isinstance(end, int):
+                        sig, body = _extract_sig_and_body(source or "", node)
+                        infos.append({"start": start, "end": end, "qual": qual, "sig": sig, "body": body})
+                    self.generic_visit(node)
+                def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # type: ignore[override]
+                    qual = ".".join(stack + [node.name]) if stack else node.name
+                    start = getattr(node, "lineno", None)
+                    end = getattr(node, "end_lineno", None)
+                    if isinstance(start, int) and isinstance(end, int):
+                        sig, body = _extract_sig_and_body(source or "", node)
+                        infos.append({"start": start, "end": end, "qual": qual, "sig": sig, "body": body})
+                    self.generic_visit(node)
+            Visitor().visit(tree)
+            infos.sort(key=lambda t: ((t["end"] - t["start"]) if ("end" in t and "start" in t) else 0, t.get("start", 0)), reverse=True)
+            for info in infos:
                 start = info.get("start")
                 end = info.get("end")
                 if isinstance(start, int) and isinstance(end, int) and start <= line <= end:
                     return info.get("sig"), info.get("body")
             return None, None
+        # Load provenance for this session
+        cur.execute("SELECT git_root, git_commit FROM session_summaries WHERE session_id=?", (session_id,))
+        row = cur.fetchone()
+        repo_root = row[0] if row else None
+        repo_commit = row[1] if row else None
+
         for r in rows:
             try:
                 vars_obj = _json.loads(r[5] or '{}')
@@ -243,7 +296,7 @@ def create_app(db_path: Optional[str] = None) -> Flask:
             except Exception:
                 delta_obj = {}
             func_name = function_for_line(r[1], int(r[2]) if r[2] is not None else -1)
-            func_sig, func_body = function_detail_for_line(r[1], int(r[2]) if r[2] is not None else -1)
+            func_sig, func_body = function_detail_for_line(r[1], int(r[2]) if r[2] is not None else -1, repo_root, repo_commit)
             reports.append({
                 "id": r[0],
                 "file": r[1],

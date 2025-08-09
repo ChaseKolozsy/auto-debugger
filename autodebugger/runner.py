@@ -78,6 +78,25 @@ class AutoDebugger:
 
     def run(self, script_path: str, args: Optional[List[str]] = None, just_my_code: bool = True, stop_on_entry: bool = True) -> str:
         script_abs = os.path.abspath(script_path)
+        # Detect git provenance
+        git_root: Optional[str] = None
+        git_commit: Optional[str] = None
+        git_dirty: int = 0
+        try:
+            import subprocess as _sp
+            # Find repo root containing the script
+            probe = _sp.run(["git", "rev-parse", "--show-toplevel"], cwd=os.path.dirname(script_abs), capture_output=True, text=True)
+            if probe.returncode == 0:
+                git_root = probe.stdout.strip()
+                head = _sp.run(["git", "rev-parse", "HEAD"], cwd=git_root, capture_output=True, text=True)
+                if head.returncode == 0:
+                    git_commit = head.stdout.strip()
+                status = _sp.run(["git", "status", "--porcelain"], cwd=git_root, capture_output=True, text=True)
+                if status.returncode == 0 and status.stdout.strip():
+                    git_dirty = 1
+        except Exception:
+            pass
+
         self.db.open()
         self.db.create_session(
             SessionSummary(
@@ -85,6 +104,9 @@ class AutoDebugger:
                 file=script_abs,
                 language="python",
                 start_time=utc_now_iso(),
+                git_root=git_root,
+                git_commit=git_commit,
+                git_dirty=git_dirty,
             )
         )
 

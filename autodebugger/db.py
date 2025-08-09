@@ -38,6 +38,10 @@ class SessionSummary:
     successful_lines: int = 0
     lines_with_errors: int = 0
     total_crashes: int = 0
+    # Provenance
+    git_root: Optional[str] = None
+    git_commit: Optional[str] = None
+    git_dirty: int = 0
 
 
 class LineReportStore:
@@ -51,6 +55,7 @@ class LineReportStore:
         self.conn.execute("PRAGMA journal_mode=WAL;")
         self._create_tables()
         self._ensure_delta_column()
+        self._ensure_git_columns()
 
     def close(self) -> None:
         if self.conn is not None:
@@ -104,6 +109,9 @@ class LineReportStore:
               successful_lines INTEGER DEFAULT 0,
               lines_with_errors INTEGER DEFAULT 0,
               total_crashes INTEGER DEFAULT 0,
+              git_root TEXT,
+              git_commit TEXT,
+              git_dirty INTEGER DEFAULT 0,
               created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
               updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
@@ -123,6 +131,26 @@ class LineReportStore:
             except sqlite3.OperationalError:
                 pass
 
+    def _ensure_git_columns(self) -> None:
+        assert self.conn is not None
+        cur = self.conn.cursor()
+        cur.execute("PRAGMA table_info(session_summaries)")
+        cols = [r[1] for r in cur.fetchall()]
+        to_add = []
+        if "git_root" not in cols:
+            to_add.append(("git_root", "TEXT"))
+        if "git_commit" not in cols:
+            to_add.append(("git_commit", "TEXT"))
+        if "git_dirty" not in cols:
+            to_add.append(("git_dirty", "INTEGER DEFAULT 0"))
+        for name, coltype in to_add:
+            try:
+                cur.execute(f"ALTER TABLE session_summaries ADD COLUMN {name} {coltype}")
+            except sqlite3.OperationalError:
+                pass
+        if to_add:
+            self.conn.commit()
+
     def create_session(self, summary: SessionSummary) -> None:
         assert self.conn is not None
         cur = self.conn.cursor()
@@ -130,8 +158,9 @@ class LineReportStore:
             """
             INSERT OR REPLACE INTO session_summaries(
               session_id, file, language, start_time, end_time,
-              total_lines_executed, successful_lines, lines_with_errors, total_crashes
-            ) VALUES (?,?,?,?,?,?,?,?,?)
+              total_lines_executed, successful_lines, lines_with_errors, total_crashes,
+              git_root, git_commit, git_dirty
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 summary.session_id,
@@ -143,6 +172,9 @@ class LineReportStore:
                 summary.successful_lines,
                 summary.lines_with_errors,
                 summary.total_crashes,
+                summary.git_root,
+                summary.git_commit,
+                int(summary.git_dirty or 0),
             ),
         )
         self.conn.commit()
