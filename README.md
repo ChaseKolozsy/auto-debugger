@@ -18,6 +18,51 @@ Audio review (macOS)
   - Scope summary: disable with `--no-scope`.
   - Function context: add `--recite-func sig` (signature) or `--recite-func full` (signature then body) to hear the containing function.
 
+MCP server (agents)
+- A minimal MCP server is included to let agents query the SQLite DB precisely (sessions, lines, crashes, function context) without loading the full DB.
+- Location: `submodules/auto-debugger/mcp-autodebug`
+- Install and run (stdio):
+  ```bash
+  cd submodules/auto-debugger/mcp-autodebug
+  npm install
+  npm run build
+  node dist/index.js
+  ```
+- Tools (summary):
+  - `listSessions(db)`: session list (id, file, start/end, counts)
+  - `getSession(db, sessionId)`: summary for one session
+  - `listLineReports(db, sessionId, offset?, limit?, status?, file?)`: page through lines
+  - `getLineReport(db, id)`: full record including variables and deltas
+  - `getCrashes(db, sessionId)`: error lines
+  - `getFunctionContext(db, sessionId, file, line, mode={sig|full})`: signature/body from snapshot/commit/disk
+
+Roadmap / TODOs
+- Audio UI
+  - Back/rewind: go back 1 line or N lines; forward N
+  - Jumping: by absolute line index, by file, by function boundary
+  - Bookmarks: add/list/jump/remove bookmarks during playback
+  - Filters/search: errors-only view; filter by file; search by variable name/key in scope or in deltas
+  - Summaries: "summarize last N lines"; "summarize session so far"; quick error summary
+  - Cross-platform TTS fallback (e.g., `pyttsx3`) and selectable synthesizers
+  - Config file for defaults (mode, rate, scope on/off, function recitation)
+
+- MCP server
+  - getFunctionContext tool (sig/full) mirroring UI snapshot/commit/disk resolution
+  - Navigation tools: aroundLine(sessionId, id, radius), byFile(sessionId, file), firstError(sessionId)
+  - Autopsy tool: exportAutopsy(sessionId) with narrative (first crash, lead-up deltas, function/scope context)
+  - Transport: optional SSE server in addition to stdio
+  - Talon grammar examples for common tool invocations
+  - Safety: read-only mode and field redaction options for sensitive data
+  - Pagination/limits: enforce sane defaults and tool-level limits
+
+- Agent workflow
+  - When a run crashes: run autodebug, export JSON, auto-analyze, propose fix, and cue audio review of key excerpts
+  - Loop: apply agent fix, re-run, compare deltas across sessions
+
+- Web UI parity
+  - Add audio controls and navigation shortcuts analogous to CLI
+  - Inline summaries and quick filters for errors/variables
+
 Selecting the Python interpreter / environments
 - The debugger can target any Python interpreter via `--python`, otherwise it uses the interpreter running the CLI (`sys.executable`). The specified interpreter must have `debugpy` installed.
 
