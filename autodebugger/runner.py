@@ -557,12 +557,8 @@ class AutoDebugger:
                                 announcement = f"Line {line}: {code}"
                                 self._tts.speak(announcement, interrupt=True)
                                 
-                                # Announce function context if available
-                                if self._controller and hasattr(self._controller.shared_state, 'get_state'):
-                                    state = self._controller.shared_state.get_state()
-                                    if state.get('function_name'):
-                                        func_announcement = f"In function {state['function_name']}"
-                                        self._tts.speak(func_announcement)
+                                # Don't announce function here - let the web interface handle it
+                                # when the function panel is open
                                 
                                 # Summarize scope
                                 def _scope_brief(variables: Dict[str, Any], max_pairs: int = 10) -> str:

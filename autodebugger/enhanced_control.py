@@ -558,6 +558,8 @@ class StepControlHandler(BaseHTTPRequestHandler):
     <script>
         let currentState = {};
         let previousVariables = {};
+        let lastAnnouncedFunction = null;  // Track last function we announced
+        let functionPanelOpen = false;     // Track if function panel is open
         
         async function fetchState() {
             try {
@@ -613,6 +615,18 @@ class StepControlHandler(BaseHTTPRequestHandler):
             document.getElementById('line').textContent = state.line || '-';
             document.getElementById('function').textContent = state.function_name || '-';
             
+            // Check if we entered a new function (or left one)
+            if (state.function_name !== lastAnnouncedFunction) {
+                if (state.function_name) {
+                    // We're in a new function
+                    if (functionPanelOpen && state.audio_enabled) {
+                        // Panel is open and audio is on - announce the new function
+                        readFunctionContext();
+                    }
+                }
+                lastAnnouncedFunction = state.function_name;
+            }
+            
             const statusEl = document.getElementById('status');
             if (state.waiting) {
                 statusEl.innerHTML = '<span class="waiting">Waiting for input</span>';
@@ -667,12 +681,11 @@ class StepControlHandler(BaseHTTPRequestHandler):
             const ctx = document.getElementById('functionContext');
             console.log('Got element:', ctx);
             ctx.classList.toggle('visible');
-            console.log('Toggle complete, visible:', ctx.classList.contains('visible'));
+            functionPanelOpen = ctx.classList.contains('visible');
+            console.log('Toggle complete, visible:', functionPanelOpen);
             
-            // If audio is enabled and function context exists, read it aloud
-            if (currentState.audio_enabled && currentState.function_name) {
-                readFunctionContext();
-            }
+            // Don't read when toggling - only read when entering new functions
+            // with the panel open (handled in updateUI)
         }
         
         function readFunctionContext() {
