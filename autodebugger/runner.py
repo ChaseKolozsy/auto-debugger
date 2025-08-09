@@ -115,6 +115,9 @@ class AutoDebugger:
         if manual_web:
             self._controller = HttpStepController()
             self._controller.start()
+            # Set initial audio state if controller supports it
+            if hasattr(self._controller, 'set_audio_state'):
+                self._controller.set_audio_state(enabled=manual_audio, available=manual_audio)
         
         if manual_audio:
             self._tts = MacSayTTS(voice=manual_voice, rate_wpm=manual_rate_wpm, verbose=False)
@@ -535,7 +538,13 @@ class AutoDebugger:
                                 )
                             
                             # Speak current line if audio enabled
-                            if self._tts:
+                            should_speak = self._tts and (
+                                not self._controller or 
+                                not hasattr(self._controller, 'is_audio_enabled') or 
+                                self._controller.is_audio_enabled()
+                            )
+                            
+                            if should_speak:
                                 # Announce line
                                 announcement = f"Line {line}: {code}"
                                 self._tts.speak(announcement, interrupt=True)

@@ -112,7 +112,9 @@ class SharedState:
             "variables_delta": {},
             "function_name": None,
             "function_sig": None,
-            "function_body": None
+            "function_body": None,
+            "audio_enabled": False,  # Will be set based on --manual-audio flag
+            "audio_available": False  # Will be set if TTS is available
         }
     
     def update_state(self, **kwargs):
@@ -146,6 +148,17 @@ class SharedState:
                 self._action_queue.get_nowait()
             except queue.Empty:
                 break
+    
+    def toggle_audio(self) -> bool:
+        """Toggle audio on/off and return new state."""
+        with self._lock:
+            self._current_state["audio_enabled"] = not self._current_state["audio_enabled"]
+            return self._current_state["audio_enabled"]
+    
+    def get_audio_state(self) -> bool:
+        """Get current audio state."""
+        with self._lock:
+            return self._current_state["audio_enabled"]
 
 
 class StepControlHandler(BaseHTTPRequestHandler):
@@ -308,6 +321,29 @@ class StepControlHandler(BaseHTTPRequestHandler):
         button.success:hover {
             background: #1e7e34;
         }
+        button.warning {
+            background: #ffc107;
+            color: #212529;
+            border-color: #ffc107;
+        }
+        button.warning:hover {
+            background: #e0a800;
+        }
+        #audioToggle {
+            background: #6c757d;
+            color: white;
+            border-color: #6c757d;
+        }
+        #audioToggle:hover {
+            background: #5a6268;
+        }
+        #audioToggle.audio-on {
+            background: #17a2b8;
+            border-color: #17a2b8;
+        }
+        #audioToggle.audio-on:hover {
+            background: #138496;
+        }
         .waiting {
             color: #28a745;
             font-weight: bold;
@@ -420,6 +456,7 @@ class StepControlHandler(BaseHTTPRequestHandler):
                     <button class="success" onclick="sendAction('auto')">Auto Mode</button>
                     <button onclick="sendAction('continue')">Continue</button>
                     <button class="danger" onclick="sendAction('quit')">Quit</button>
+                    <button id="audioToggle" onclick="toggleAudio()">🔇 Audio Off</button>
                 </div>
             </div>
             
@@ -546,11 +583,39 @@ class StepControlHandler(BaseHTTPRequestHandler):
             if (state.variables_delta) {
                 renderVariables(state.variables_delta, 'changes', true);
             }
+            
+            // Update audio button
+            const audioBtn = document.getElementById('audioToggle');
+            if (state.audio_available) {
+                audioBtn.style.display = 'inline-block';
+                if (state.audio_enabled) {
+                    audioBtn.textContent = '🔊 Audio On';
+                    audioBtn.classList.add('audio-on');
+                } else {
+                    audioBtn.textContent = '🔇 Audio Off';
+                    audioBtn.classList.remove('audio-on');
+                }
+            } else {
+                audioBtn.style.display = 'none';
+            }
         }
         
         function toggleFunction() {
             const ctx = document.getElementById('functionContext');
             ctx.classList.toggle('visible');
+        }
+        
+        async function toggleAudio() {
+            try {
+                const response = await fetch('/toggle-audio', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+                const result = await response.json();
+                // Update will happen via regular state polling
+            } catch (e) {
+                console.error('Failed to toggle audio:', e);
+            }
         }
         
         async function sendAction(action) {
@@ -603,6 +668,9 @@ class StepControlHandler(BaseHTTPRequestHandler):
                 self._send(200, {"status": "ok", "action": action})
             else:
                 self._send(400, {"error": "Invalid action"})
+        elif self.path == "/toggle-audio":
+            new_state = self.shared.toggle_audio()
+            self._send(200, {"status": "ok", "audio_enabled": new_state})
         else:
             self.send_error(404)
     
@@ -661,6 +729,14 @@ class HttpStepController:
     def clear_actions(self):
         """Clear any pending actions."""
         self.shared_state.clear_actions()
+    
+    def is_audio_enabled(self) -> bool:
+        """Check if audio is enabled."""
+        return self.shared_state.get_audio_state()
+    
+    def set_audio_state(self, enabled: bool, available: bool = True):
+        """Set audio state."""
+        self.shared_state.update_state(audio_enabled=enabled, audio_available=available)
 
 
 def prompt_for_action(timeout: Optional[float] = None) -> Optional[str]:
