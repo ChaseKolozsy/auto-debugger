@@ -23,11 +23,47 @@ def main() -> None:  # pragma: no cover
 @click.option("--db", "db_path", type=click.Path(), default=None, help="SQLite DB path for reports.")
 @click.option("--stop/--no-stop", "stop_on_entry", default=True, help="Stop on entry.")
 @click.option("--just-my-code/--all-code", "just_my_code", default=True, help="Restrict to user code.")
+@click.option("--manual/--auto", "manual", default=False, help="Enable manual stepping mode (press Enter to step).")
+@click.option(
+    "--manual-from",
+    "manual_from",
+    type=str,
+    default=None,
+    help="Activate manual mode when reaching file:line (e.g., path/to/file.py:123).",
+)
+@click.option("--manual-web/--no-manual-web", "manual_web", default=False, help="Expose a local web controller for manual stepping.")
+@click.option("--manual-audio/--no-manual-audio", "manual_audio", default=False, help="Speak current line and changes during manual stepping.")
+@click.option("--manual-voice", "manual_voice", type=str, default=None, help="Voice name for macOS 'say' in manual audio mode.")
+@click.option("--manual-rate", "manual_rate_wpm", type=int, default=210, show_default=True, help="Speech rate for manual audio mode.")
 @click.argument("script", type=click.Path(exists=True))
 @click.argument("script_args", nargs=-1)
-def run_cmd(python_exe: Optional[str], db_path: Optional[str], stop_on_entry: bool, just_my_code: bool, script: str, script_args: tuple[str, ...]) -> None:
+def run_cmd(
+    python_exe: Optional[str],
+    db_path: Optional[str],
+    stop_on_entry: bool,
+    just_my_code: bool,
+    manual: bool,
+    manual_from: Optional[str],
+    manual_web: bool,
+    manual_audio: bool,
+    manual_voice: Optional[str],
+    manual_rate_wpm: int,
+    script: str,
+    script_args: tuple[str, ...],
+) -> None:
     dbg = AutoDebugger(python_exe=python_exe, db_path=db_path)
-    session_id = dbg.run(script, list(script_args), just_my_code=just_my_code, stop_on_entry=stop_on_entry)
+    session_id = dbg.run(
+        script,
+        list(script_args),
+        just_my_code=just_my_code,
+        stop_on_entry=stop_on_entry,
+        manual=manual,
+        manual_from=manual_from,
+        manual_web=manual_web,
+        manual_audio=manual_audio,
+        manual_voice=manual_voice,
+        manual_rate_wpm=manual_rate_wpm,
+    )
     click.echo(session_id)
 
 

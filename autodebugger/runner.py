@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import select
 import shlex
 import socket
 import subprocess
@@ -10,12 +11,14 @@ import time
 import traceback
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import debugpy
 
+from .control import HttpStepController, prompt_for_action
 from .dap_client import DapClient
 from .db import LineReport, LineReportStore, SessionSummary
+from .audio_ui import MacSayTTS, summarize_delta
 
 
 def utc_now_iso() -> str:
@@ -31,6 +34,9 @@ class AutoDebugger:
         self.adapter_port = self._find_free_port()
         self._adapter_proc: Optional[subprocess.Popen] = None
         self.client: Optional[DapClient] = None
+        self._controller: Optional[HttpStepController] = None
+        self._tts: Optional[MacSayTTS] = None
+        self._abort_requested: bool = False
 
     def _find_free_port(self) -> int:
         with socket.socket() as s:
@@ -76,8 +82,38 @@ class AutoDebugger:
                     pass
             self._adapter_proc = None
 
-    def run(self, script_path: str, args: Optional[List[str]] = None, just_my_code: bool = True, stop_on_entry: bool = True) -> str:
+    def run(
+        self,
+        script_path: str,
+        args: Optional[List[str]] = None,
+        just_my_code: bool = True,
+        stop_on_entry: bool = True,
+        manual: bool = False,
+        manual_from: Optional[str] = None,
+        manual_web: bool = False,
+        manual_audio: bool = False,
+        manual_voice: Optional[str] = None,
+        manual_rate_wpm: int = 210,
+    ) -> str:
         script_abs = os.path.abspath(script_path)
+        
+        # Parse manual_from trigger
+        manual_trigger_file: Optional[str] = None
+        manual_trigger_line: int = 0
+        if manual_from:
+            parts = manual_from.rsplit(':', 1)
+            if len(parts) == 2 and parts[1].isdigit():
+                manual_trigger_file = os.path.abspath(parts[0])
+                manual_trigger_line = int(parts[1])
+        
+        # Setup manual control interfaces
+        manual_mode_active = manual and not manual_from  # Start in manual if no trigger
+        if manual_web:
+            self._controller = HttpStepController()
+            self._controller.start()
+        
+        if manual_audio:
+            self._tts = MacSayTTS(voice=manual_voice, rate_wpm=manual_rate_wpm, verbose=False)
         # Detect git provenance
         git_root: Optional[str] = None
         git_commit: Optional[str] = None
@@ -190,16 +226,59 @@ class AutoDebugger:
                 client.request("setExceptionBreakpoints", {"filters": ["uncaught"], "filterOptions": []}, wait=10.0)
             except Exception:
                 pass
-            # Provide an empty setBreakpoints for the main script to conform to some adapters
+            # Set breakpoints to ensure we stop early in manual mode
             try:
+                breakpoints: List[Dict[str, int]] = []
+                if manual or stop_on_entry:
+                    # Set dense breakpoints on all likely executable lines
+                    try:
+                        with open(script_abs, "r", encoding="utf-8") as _sf:
+                            _lines = _sf.readlines()
+                        for idx, text in enumerate(_lines, start=1):
+                            stripped = text.strip()
+                            # Skip empty lines and comments
+                            if not stripped or stripped.startswith('#'):
+                                continue
+                            # Skip docstrings and multiline strings
+                            if '"""' in stripped or "'''" in stripped:
+                                continue
+                            # Add breakpoint for likely executable lines
+                            if any(kw in text for kw in ['=', 'if ', 'for ', 'while ', 'def ', 'class ', 'return', 'print', 'import']):
+                                breakpoints.append({"line": idx})
+                            # Also add for lines that don't start with whitespace (top-level)
+                            elif not text.startswith(' ') and not text.startswith('\t'):
+                                breakpoints.append({"line": idx})
+                    except Exception:
+                        # Fallback to line 1
+                        breakpoints = [{"line": 1}]
+                
                 client.request("setBreakpoints", {
                     "source": {"path": script_abs},
-                    "breakpoints": []
+                    "breakpoints": breakpoints
                 }, wait=10.0)
             except Exception:
                 pass
             # Send configurationDone to start execution
             client.request("configurationDone", {}, wait=15.0)
+            
+            # Force initial pause in manual mode
+            if manual:
+                try:
+                    # Get threads and pause them
+                    thr = client.request("threads", {}, wait=5.0)
+                    tids = [int(t.get("id")) for t in thr.body.get("threads", [])] if thr.body else []
+                    if not tids:
+                        # Give debuggee time to start
+                        time.sleep(0.05)
+                        thr2 = client.request("threads", {}, wait=5.0)
+                        tids = [int(t.get("id")) for t in thr2.body.get("threads", [])] if thr2.body else []
+                    for tid in tids:
+                        try:
+                            client.request("pause", {"threadId": tid}, wait=2.0)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
             # Now wait for launch response (non-fatal if it times out quickly)
             try:
                 _ = client.wait_response(launch_seq, wait=10.0)
@@ -212,7 +291,46 @@ class AutoDebugger:
             prev_vars: Dict[str, Any] = {}
             # Snapshot each source file once per session so UI can render exact code for dirty/no-git runs
             snapshotted_files: Set[str] = set()
+            
+            def _check_for_action(timeout: float = 0.0) -> Optional[str]:
+                """Check for user action from web or stdin."""
+                action = None
+                if self._controller:
+                    action = self._controller.wait_for_action(timeout)
+                elif manual_mode_active and timeout > 0:
+                    # Check stdin with select if available
+                    if hasattr(select, 'select'):
+                        rlist, _, _ = select.select([sys.stdin], [], [], timeout)
+                        if rlist:
+                            try:
+                                response = input().strip().lower()
+                                if response == '' or response == 'step':
+                                    action = 'step'
+                                elif response in ['a', 'auto']:
+                                    action = 'auto'
+                                elif response in ['c', 'continue']:
+                                    action = 'continue'
+                                elif response in ['q', 'quit', 'exit']:
+                                    action = 'quit'
+                            except (EOFError, KeyboardInterrupt):
+                                action = 'quit'
+                return action
+            
             while running:
+                # Check for abort even while running
+                if self._controller is not None:
+                    act = _check_for_action(0.0)
+                    if act == 'quit':
+                        self._abort_requested = True
+                        try:
+                            client.request("disconnect", {"terminateDebuggee": True}, wait=2.0)
+                        except Exception:
+                            pass
+                        break
+                    elif act == 'auto':
+                        manual_mode_active = False
+                        if self._controller:
+                            self._controller.update_state(mode='auto')
                 events = client.pop_events()
                 # If nothing arrived, small sleep to avoid spin
                 if not events:
@@ -225,6 +343,28 @@ class AutoDebugger:
                     if ev.event == "stopped":
                         thread_id = int(ev.body.get("threadId")) if ev.body else 0
                         reason = ev.body.get("reason") if ev.body else ""
+                        
+                        # Check if we should activate manual mode
+                        if manual_from and not manual_mode_active:
+                            # Query stack to check location
+                            st_check = client.request("stackTrace", {"threadId": thread_id})
+                            frames_check = st_check.body.get("stackFrames", []) if st_check.body else []
+                            if frames_check:
+                                frame_check = frames_check[0]
+                                file_check = frame_check.get("source", {}).get("path") or ""
+                                line_check = int(frame_check.get("line") or 0)
+                                
+                                # Normalize paths for comparison
+                                if manual_trigger_file:
+                                    file_check_abs = os.path.abspath(file_check)
+                                    if file_check_abs == manual_trigger_file and line_check >= manual_trigger_line:
+                                        manual_mode_active = True
+                                        if self._controller:
+                                            self._controller.update_state(mode='manual')
+                                        if self._tts:
+                                            self._tts.speak(f"Manual mode activated at line {line_check}", interrupt=True)
+                                        print(f"\n[manual] Activated at {os.path.basename(file_check)}:{line_check}\n", flush=True)
+                        
                         # Query stack, scopes, variables
                         st = client.request("stackTrace", {"threadId": thread_id})
                         frames = st.body.get("stackFrames", []) if st.body else []
@@ -370,7 +510,100 @@ class AutoDebugger:
                                 stack_trace=stack_trace_text,
                             )
                         )
-
+                        
+                        # Handle manual stepping
+                        if manual_mode_active:
+                            # Update controller state
+                            if self._controller:
+                                self._controller.update_state(
+                                    session_id=self.session_id,
+                                    file=file_path,
+                                    line=line,
+                                    code=code,
+                                    waiting=True,
+                                    mode='manual'
+                                )
+                            
+                            # Speak current line if audio enabled
+                            if self._tts:
+                                # Announce line
+                                announcement = f"Line {line}: {code}"
+                                self._tts.speak(announcement, interrupt=True)
+                                
+                                # Summarize scope
+                                def _scope_brief(variables: Dict[str, Any], max_pairs: int = 10) -> str:
+                                    try:
+                                        chosen = None
+                                        for name in ("Locals", "locals", "Local", "Globals", "globals"):
+                                            v = variables.get(name)
+                                            if isinstance(v, dict):
+                                                chosen = v
+                                                break
+                                        if chosen is None:
+                                            for v in variables.values():
+                                                if isinstance(v, dict):
+                                                    chosen = v
+                                                    break
+                                        if chosen:
+                                            items = list(chosen.items())[:max_pairs]
+                                            parts = []
+                                            for k, v in items:
+                                                if isinstance(v, dict) and "value" in v:
+                                                    v = v["value"]
+                                                s = str(v)
+                                                if len(s) > 40:
+                                                    s = s[:37] + "..."
+                                                parts.append(f"{k} is {s}")
+                                            return "; ".join(parts)
+                                    except Exception:
+                                        pass
+                                    return ""
+                                
+                                scope_summary = _scope_brief(vars_payload)
+                                if scope_summary:
+                                    self._tts.speak(scope_summary)
+                                
+                                # Announce changes
+                                if variables_delta:
+                                    delta_summary = summarize_delta(variables_delta)
+                                    if delta_summary and delta_summary != "no changes":
+                                        self._tts.speak(f"Changes: {delta_summary}")
+                            
+                            # Wait for user action
+                            action = None
+                            if self._controller:
+                                # Web interface
+                                while action is None:
+                                    action = self._controller.wait_for_action(0.5)
+                                    if self._abort_requested:
+                                        action = 'quit'
+                                        break
+                            else:
+                                # Terminal interface
+                                action = prompt_for_action()
+                            
+                            # Update controller state
+                            if self._controller:
+                                self._controller.update_state(waiting=False)
+                            
+                            # Process action
+                            if action == 'quit':
+                                try:
+                                    client.request("disconnect", {"terminateDebuggee": True}, wait=2.0)
+                                except Exception:
+                                    pass
+                                running = False
+                                break
+                            elif action == 'auto':
+                                manual_mode_active = False
+                                if self._controller:
+                                    self._controller.update_state(mode='auto')
+                                print("\n[manual] Switched to auto mode\n", flush=True)
+                            elif action == 'continue':
+                                client.request("continue", {"threadId": thread_id})
+                                continue
+                            # Default: step
+                        
                         # Step into to capture lines inside function calls as well
                         client.request("stepIn", {"threadId": thread_id})
 
@@ -387,5 +620,16 @@ class AutoDebugger:
             self.db.end_session(self.session_id, utc_now_iso())
             return self.session_id
         finally:
+            # Clean up manual control resources
+            if self._controller:
+                try:
+                    self._controller.stop()
+                except Exception:
+                    pass
+            if self._tts:
+                try:
+                    self._tts.stop()
+                except Exception:
+                    pass
             self._stop_adapter()
             self.db.close()
