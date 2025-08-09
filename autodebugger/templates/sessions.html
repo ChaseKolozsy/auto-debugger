@@ -32,7 +32,9 @@
         <th>Lines</th>
         <th>Errors</th>
         <th>Crashes</th>
+        <th>Size</th>
         <th>Updated</th>
+        <th>Actions</th>
       </tr>
     </thead>
     <tbody>
@@ -44,7 +46,13 @@
         <td class="count">{{s.total_lines_executed}}</td>
         <td class="count">{{s.lines_with_errors}}</td>
         <td class="count">{{s.total_crashes}}</td>
+        <td>{{ (s.size_bytes // 1024) }} KB</td>
         <td>{{s.updated_at}}</td>
+        <td>
+          <form method="post" action="/session/{{s.session_id}}/delete" onsubmit="return confirm('Delete session {{s.session_id}}? This cannot be undone.');">
+            <button type="submit">Delete</button>
+          </form>
+        </td>
       </tr>
       {% endfor %}
     </tbody>

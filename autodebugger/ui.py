@@ -35,8 +35,14 @@ def create_app(db_path: Optional[str] = None) -> Flask:
         q = "SELECT session_id, file, language, start_time, end_time, total_lines_executed, successful_lines, lines_with_errors, total_crashes, updated_at FROM session_summaries ORDER BY updated_at DESC"
         cur.execute(q)
         rows = cur.fetchall()
-        sessions = [
-            {
+        sessions = []
+        for r in rows:
+            size_bytes = 0
+            try:
+                size_bytes = store.estimate_session_size(r[0])
+            except Exception:
+                size_bytes = 0
+            sessions.append({
                 "session_id": r[0],
                 "file": r[1],
                 "language": r[2],
@@ -47,9 +53,8 @@ def create_app(db_path: Optional[str] = None) -> Flask:
                 "lines_with_errors": r[7],
                 "total_crashes": r[8],
                 "updated_at": r[9],
-            }
-            for r in rows
-        ]
+                "size_bytes": size_bytes,
+            })
         # Distinct script entry points for filter
         cur.execute("SELECT DISTINCT file FROM session_summaries ORDER BY file")
         entries = [r[0] for r in cur.fetchall()]
@@ -73,8 +78,14 @@ def create_app(db_path: Optional[str] = None) -> Flask:
         cur = conn.cursor()
         cur.execute(q, params)
         rows = cur.fetchall()
-        sessions = [
-            {
+        sessions = []
+        for r in rows:
+            size_bytes = 0
+            try:
+                size_bytes = store.estimate_session_size(r[0])
+            except Exception:
+                size_bytes = 0
+            sessions.append({
                 "session_id": r[0],
                 "file": r[1],
                 "language": r[2],
@@ -85,9 +96,8 @@ def create_app(db_path: Optional[str] = None) -> Flask:
                 "lines_with_errors": r[7],
                 "total_crashes": r[8],
                 "updated_at": r[9],
-            }
-            for r in rows
-        ]
+                "size_bytes": size_bytes,
+            })
         return render_template("sessions.html", sessions=sessions, selected_entry=entry)
 
     @app.route("/session/<session_id>")
@@ -103,6 +113,10 @@ def create_app(db_path: Optional[str] = None) -> Flask:
         # Map columns
         columns = [d[0] for d in cur.description]
         summary = {columns[i]: summary_row[i] for i in range(len(columns))}
+        try:
+            summary["size_bytes"] = store.estimate_session_size(session_id)
+        except Exception:
+            summary["size_bytes"] = 0
 
         # Optional filter by file/line/status
         file_filter = request.args.get("file")
@@ -326,5 +340,14 @@ def create_app(db_path: Optional[str] = None) -> Flask:
         cur.execute("SELECT DISTINCT file FROM line_reports WHERE session_id=? ORDER BY file", (session_id,))
         files = [r[0] for r in cur.fetchall()]
         return render_template("session_detail.html", session=summary, reports=reports, files=files, selected_file=file_filter, selected_status=status)
+
+    @app.route("/session/<session_id>/delete", methods=["POST"])
+    def delete_session(session_id: str):
+        store = get_store(); app._req_store = store  # type: ignore[attr-defined]
+        try:
+            store.delete_session(session_id)
+        except Exception:
+            pass
+        return redirect(url_for("index"))
 
     return app

@@ -120,12 +120,15 @@
   <header>
     <a href="/">← Sessions</a>
     <h2>Session {{session.session_id}}</h2>
+    <form method="post" action="/session/{{session.session_id}}/delete" onsubmit="return confirm('Delete session {{session.session_id}}? This cannot be undone.');" style="margin-left:auto;">
+      <button type="submit">Delete</button>
+    </form>
   </header>
 
   <div>
     <div>Entry: <code>{{session.file}}</code></div>
     <div>Language: {{session.language}}</div>
-    <div>Lines: {{session.total_lines_executed}} | Errors: {{session.lines_with_errors}} | Crashes: {{session.total_crashes}}</div>
+    <div>Lines: {{session.total_lines_executed}} | Errors: {{session.lines_with_errors}} | Crashes: {{session.total_crashes}} | Size: {{ (session.size_bytes // 1024) }} KB</div>
   </div>
 
   <form method="get" class="filters">

@@ -332,3 +332,48 @@ class LineReportStore:
             },
         }
         return json.dumps(export_payload, indent=2)
+
+    def delete_session(self, session_id: str) -> None:
+        """Delete a session and all associated data from the store."""
+        assert self.conn is not None
+        cur = self.conn.cursor()
+        cur.execute("DELETE FROM line_reports WHERE session_id=?", (session_id,))
+        cur.execute("DELETE FROM file_snapshots WHERE session_id=?", (session_id,))
+        cur.execute("DELETE FROM session_summaries WHERE session_id=?", (session_id,))
+        self.conn.commit()
+
+    def estimate_session_size(self, session_id: str) -> int:
+        """Approximate storage size on disk for a session, in bytes.
+
+        Includes the length of text fields stored per line report and the
+        compressed snapshot blob sizes. This is an estimate suitable for UI display.
+        """
+        assert self.conn is not None
+        cur = self.conn.cursor()
+        # Sum approximate bytes for text columns in line_reports
+        cur.execute(
+            """
+            SELECT COALESCE(SUM(
+                LENGTH(COALESCE(variables,'')) +
+                LENGTH(COALESCE(variables_delta,'')) +
+                LENGTH(COALESCE(code,'')) +
+                LENGTH(COALESCE(observations,'')) +
+                LENGTH(COALESCE(error_message,'')) +
+                LENGTH(COALESCE(error_type,'')) +
+                LENGTH(COALESCE(stack_trace,''))
+            ), 0)
+            FROM line_reports
+            WHERE session_id=?
+            """,
+            (session_id,),
+        )
+        lr_bytes_row = cur.fetchone()
+        lr_bytes = int((lr_bytes_row[0] if lr_bytes_row and lr_bytes_row[0] is not None else 0))
+        # Sum compressed snapshot sizes
+        cur.execute(
+            "SELECT COALESCE(SUM(LENGTH(content_gzip)), 0) FROM file_snapshots WHERE session_id=?",
+            (session_id,),
+        )
+        snap_bytes_row = cur.fetchone()
+        snap_bytes = int((snap_bytes_row[0] if snap_bytes_row and snap_bytes_row[0] is not None else 0))
+        return lr_bytes + snap_bytes
