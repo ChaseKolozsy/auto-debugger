@@ -10,7 +10,7 @@ import time
 import traceback
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import debugpy
 
@@ -210,6 +210,8 @@ class AutoDebugger:
             threads: Dict[int, None] = {}
             running = True
             prev_vars: Dict[str, Any] = {}
+            # Snapshot each source file once per session so UI can render exact code for dirty/no-git runs
+            snapshotted_files: Set[str] = set()
             while running:
                 events = client.pop_events()
                 # If nothing arrived, small sleep to avoid spin
@@ -231,6 +233,19 @@ class AutoDebugger:
                         frame = frames[0]
                         file_path = frame.get("source", {}).get("path") or ""
                         line = int(frame.get("line") or 0)
+
+                        # Snapshot the file content the first time we encounter it in this session
+                        # This ensures the UI can fetch function details from the exact source that ran,
+                        # even when the working tree is dirty or the file changes after execution.
+                        if file_path and file_path not in snapshotted_files:
+                            try:
+                                with open(file_path, "rb") as _f:
+                                    _content = _f.read()
+                                self.db.add_file_snapshot(self.session_id, file_path, _content)
+                                snapshotted_files.add(file_path)
+                            except Exception:
+                                # Best-effort; continue even if snapshotting fails
+                                pass
 
                         # Grab code line
                         code = ""

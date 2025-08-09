@@ -222,10 +222,18 @@ def create_app(db_path: Optional[str] = None) -> Flask:
                     return info.get("qual")
             return None
 
-        def function_detail_for_line(pyfile: str, line: int, repo_root: _Optional[str], commit: _Optional[str]) -> Tuple[_Optional[str], _Optional[str]]:
-            # Prefer reading the file content from git at the recorded commit
+        def function_detail_for_line(pyfile: str, line: int, repo_root: _Optional[str], commit: _Optional[str], repo_dirty: int) -> Tuple[_Optional[str], _Optional[str]]:
+            # When dirty, prefer DB snapshot; otherwise prefer committed source. Fallback to disk.
             source: _Optional[str] = None
-            if repo_root and commit and os.path.abspath(pyfile).startswith(os.path.abspath(repo_root)):
+            if int(repo_dirty or 0) != 0:
+                try:
+                    store: LineReportStore = app._req_store  # type: ignore[attr-defined]
+                    snap = store.get_file_snapshot(session_id, pyfile)
+                    if snap:
+                        source = snap
+                except Exception:
+                    source = None
+            if source is None and repo_root and commit and os.path.abspath(pyfile).startswith(os.path.abspath(repo_root)):
                 rel = os.path.relpath(pyfile, repo_root)
                 try:
                     import subprocess as _sp
@@ -234,22 +242,12 @@ def create_app(db_path: Optional[str] = None) -> Flask:
                         source = show.stdout.decode("utf-8", errors="replace")
                 except Exception:
                     source = None
-            # Fallback to disk
             if source is None:
-                # Try snapshot from DB when available
                 try:
-                    store: LineReportStore = app._req_store  # type: ignore[attr-defined]
-                    snap = store.get_file_snapshot(session_id, pyfile)
-                    if snap:
-                        source = snap
+                    with open(pyfile, "r", encoding="utf-8") as f:
+                        source = f.read()
                 except Exception:
                     source = None
-                if source is None:
-                    try:
-                        with open(pyfile, "r", encoding="utf-8") as f:
-                            source = f.read()
-                    except Exception:
-                        source = None
             if not source:
                 return None, None
             try:
@@ -290,10 +288,11 @@ def create_app(db_path: Optional[str] = None) -> Flask:
                     return info.get("sig"), info.get("body")
             return None, None
         # Load provenance for this session
-        cur.execute("SELECT git_root, git_commit FROM session_summaries WHERE session_id=?", (session_id,))
+        cur.execute("SELECT git_root, git_commit, git_dirty FROM session_summaries WHERE session_id=?", (session_id,))
         row = cur.fetchone()
         repo_root = row[0] if row else None
         repo_commit = row[1] if row else None
+        repo_dirty = int(row[2]) if row and row[2] is not None else 0
 
         for r in rows:
             try:
@@ -305,7 +304,7 @@ def create_app(db_path: Optional[str] = None) -> Flask:
             except Exception:
                 delta_obj = {}
             func_name = function_for_line(r[1], int(r[2]) if r[2] is not None else -1)
-            func_sig, func_body = function_detail_for_line(r[1], int(r[2]) if r[2] is not None else -1, repo_root, repo_commit)
+            func_sig, func_body = function_detail_for_line(r[1], int(r[2]) if r[2] is not None else -1, repo_root, repo_commit, repo_dirty)
             reports.append({
                 "id": r[0],
                 "file": r[1],
