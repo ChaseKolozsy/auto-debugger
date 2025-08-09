@@ -11,9 +11,12 @@ Usage
 
 Audio review (macOS)
 - Review sessions with audio + typing: `autodebug audio --db .autodebug/line_reports.db`
-- Options: `--voice <name>` (omit to use system default), `--rate 210`, `--delay 0.4`, `--verbose`
+- Options: `--voice <name>` (omit to use system default), `--rate 210`, `--delay 0.4`, `--verbose`, `--mode {manual,auto}`, `--recite-func {off,sig,full}`, `--no-scope`
 - Session selection (paged 0–9): type a digit 0–9 and Enter to select; type `okay` for 0; `next` for next page.
 - During playback: it reads each executed line and variable changes. Type notes and press Enter to save them as observations for the current line. Type `next` (or `n`) and Enter to advance; `q` quits.
+  - Auto mode: pass `--mode auto` to advance automatically with a small pacing delay.
+  - Scope summary: disable with `--no-scope`.
+  - Function context: add `--recite-func sig` (signature) or `--recite-func full` (signature then body) to hear the containing function.
 
 Selecting the Python interpreter / environments
 - The debugger can target any Python interpreter via `--python`, otherwise it uses the interpreter running the CLI (`sys.executable`). The specified interpreter must have `debugpy` installed.

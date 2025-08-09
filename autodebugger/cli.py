@@ -62,7 +62,10 @@ def ui_cmd(db_path: Optional[str], host: str, port: int, open_browser: bool) -> 
 @click.option("--rate", default=210, show_default=True, type=int, help="Speech rate (words per minute)")
 @click.option("--delay", default=0.4, show_default=True, type=float, help="Delay between lines during autoplay (seconds)")
 @click.option("--verbose", is_flag=True, default=False, help="Print spoken text and selection info to console")
-def audio_cmd(db_path: Optional[str], voice: Optional[str], rate: int, delay: float, verbose: bool) -> None:
+@click.option("--mode", type=click.Choice(["auto", "manual"], case_sensitive=False), default="manual", show_default=True, help="Playback mode")
+@click.option("--recite-func", type=click.Choice(["off", "sig", "full"], case_sensitive=False), default="off", show_default=True, help="Recite function signature/body for each line")
+@click.option("--no-scope", is_flag=True, default=False, help="Do not speak scope summary for each line")
+def audio_cmd(db_path: Optional[str], voice: Optional[str], rate: int, delay: float, verbose: bool, mode: str, recite_func: str, no_scope: bool) -> None:
     """macOS audio interface for reviewing sessions (TTS + optional voice commands)."""
     code = run_audio_interface(
         db_path=db_path,
@@ -70,6 +73,9 @@ def audio_cmd(db_path: Optional[str], voice: Optional[str], rate: int, delay: fl
         rate_wpm=rate,
         delay_s=delay,
         verbose=verbose,
+        mode=mode.lower(),
+        recite_function=recite_func.lower(),
+        speak_scope=(not no_scope),
     )
     # propagate exit code
     sys.exit(code)

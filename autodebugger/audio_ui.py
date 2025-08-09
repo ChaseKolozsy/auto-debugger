@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
-from .db import DEFAULT_DB_PATH
+from .db import DEFAULT_DB_PATH, LineReportStore
 
 
 class MacSayTTS:
@@ -274,11 +274,140 @@ def paginate_sessions(conn: sqlite3.Connection, tts: MacSayTTS) -> Optional[Sess
             page += 1
 
 
+def _format_scope_brief(variables: Dict[str, Any], max_pairs: int = 10) -> str:
+    scopes_priority = ["Locals", "locals", "Local", "Globals", "globals"]
+    chosen: Optional[Dict[str, Any]] = None
+    for name in scopes_priority:
+        if isinstance(variables.get(name), dict):
+            chosen = variables[name]
+            break
+    if chosen is None:
+        # fall back to any first dict scope
+        for v in variables.values():
+            if isinstance(v, dict):
+                chosen = v; break
+    if not isinstance(chosen, dict):
+        return "no scope"
+    parts: List[str] = []
+    for k, v in list(chosen.items())[:max_pairs]:
+        val = v.get("value") if isinstance(v, dict) and "value" in v else v
+        s = str(val)
+        if len(s) > 40:
+            s = s[:37] + "..."
+        parts.append(f"{k}={s}")
+    return ", ".join(parts) if parts else "empty"
+
+
+def _load_repo_provenance(conn: sqlite3.Connection, session_id: str) -> tuple[Optional[str], Optional[str], int]:
+    cur = conn.cursor()
+    cur.execute("SELECT git_root, git_commit, git_dirty FROM session_summaries WHERE session_id=?", (session_id,))
+    row = cur.fetchone()
+    if not row:
+        return None, None, 0
+    root = row[0]
+    commit = row[1]
+    dirty = int(row[2]) if row[2] is not None else 0
+    return root, commit, dirty
+
+
+def _function_signature_and_body(
+    store: LineReportStore,
+    pyfile: str,
+    line_no: int,
+    repo_root: Optional[str],
+    commit: Optional[str],
+    dirty: int,
+) -> tuple[Optional[str], Optional[str]]:
+    # Reuse the logic from ui.py to choose source (snapshot -> committed -> disk)
+    source: Optional[str] = None
+    if int(dirty or 0) != 0:
+        try:
+            snap = store.get_file_snapshot(store_session_id := store.conn.execute("SELECT ?", ("dummy",)).fetchone(), pyfile)  # type: ignore
+        except Exception:
+            snap = None
+        if snap:
+            source = snap
+    if source is None and repo_root and commit and os.path.abspath(pyfile).startswith(os.path.abspath(repo_root)):
+        rel = os.path.relpath(pyfile, repo_root)
+        try:
+            import subprocess as _sp
+            show = _sp.run(["git", "show", f"{commit}:{rel}"], cwd=repo_root, capture_output=True)
+            if show.returncode == 0:
+                source = show.stdout.decode("utf-8", errors="replace")
+        except Exception:
+            source = None
+    if source is None:
+        try:
+            with open(pyfile, "r", encoding="utf-8") as f:
+                source = f.read()
+        except Exception:
+            source = None
+    if not source:
+        return None, None
+    try:
+        import ast
+        tree = ast.parse(source, filename=pyfile)
+    except Exception:
+        return None, None
+    # Find containing function with signature and body
+    sig_out: Optional[str] = None
+    body_out: Optional[str] = None
+    stack: List[str] = []
+    import ast as _ast
+
+    def _extract_sig_and_body(source_text: str, node: _ast.AST) -> tuple[str, str]:
+        try:
+            segment = _ast.get_source_segment(source_text, node) or ""
+        except Exception:
+            segment = ""
+        lines = segment.splitlines()
+        if not lines:
+            return "", ""
+        sig_lines: List[str] = []
+        for ln in lines:
+            sig_lines.append(ln)
+            if ln.rstrip().endswith(":"):
+                break
+        body_lines = lines[len(sig_lines):]
+        sig = "\n".join(sig_lines).strip()
+        body = "\n".join(body_lines).strip()
+        max_chars = 800
+        if len(body) > max_chars:
+            body = body[: max_chars - 1] + "\n…"
+        return sig, body
+
+    class Visitor(_ast.NodeVisitor):
+        def visit_ClassDef(self, node: _ast.ClassDef) -> None:  # type: ignore[override]
+            stack.append(node.name)
+            self.generic_visit(node)
+            stack.pop()
+        def visit_FunctionDef(self, node: _ast.FunctionDef) -> None:  # type: ignore[override]
+            start = getattr(node, "lineno", None)
+            end = getattr(node, "end_lineno", None)
+            if isinstance(start, int) and isinstance(end, int) and start <= line_no <= end:
+                nonlocal sig_out, body_out
+                sig_out, body_out = _extract_sig_and_body(source or "", node)
+            self.generic_visit(node)
+        def visit_AsyncFunctionDef(self, node: _ast.AsyncFunctionDef) -> None:  # type: ignore[override]
+            start = getattr(node, "lineno", None)
+            end = getattr(node, "end_lineno", None)
+            if isinstance(start, int) and isinstance(end, int) and start <= line_no <= end:
+                nonlocal sig_out, body_out
+                sig_out, body_out = _extract_sig_and_body(source or "", node)
+            self.generic_visit(node)
+
+    Visitor().visit(tree)
+    return sig_out, body_out
+
+
 def autoplay_session(
     conn: sqlite3.Connection,
     tts: MacSayTTS,
     session: SessionItem,
     delay_s: float = 0.4,
+    mode: str = "manual",  # "auto" or "manual"
+    speak_scope: bool = True,
+    recite_function: str = "off",  # "off" | "sig" | "full"
 ) -> None:
     tts.speak(f"Playing session {session.script_name}")
     for rec in iter_line_reports(conn, session.session_id):
@@ -300,6 +429,18 @@ def autoplay_session(
         while tts.is_speaking():
             time.sleep(0.05)
 
+        # Speak scope state if requested
+        try:
+            vars_obj = rec.get("variables") or {}
+            if speak_scope:
+                brief = _format_scope_brief(vars_obj)
+                if brief:
+                    tts.speak(f"Scope: {brief}")
+                    while tts.is_speaking():
+                        time.sleep(0.05)
+        except Exception:
+            pass
+
         summary = summarize_delta(delta)
         if summary and summary != "no changes":
             tts.speak(f"Changes: {summary}")
@@ -316,21 +457,50 @@ def autoplay_session(
             while tts.is_speaking():
                 time.sleep(0.05)
 
-        # Now block until user submits 'next', saving any other entered text as notes
-        while True:
-            cmd_or_note = _prompt("Note or 'next' (q to quit): ").strip()
-            low = cmd_or_note.lower()
-            if low in ("next", "n"):
-                break
-            if low in ("quit", "q", "exit"):
-                tts.speak("Stopping playback", interrupt=True)
-                return
-            if cmd_or_note:
+        # Optionally recite function context
+        if recite_function in {"sig", "full"}:
+            try:
+                repo_root, repo_commit, repo_dirty = _load_repo_provenance(conn, session.session_id)
+                store = LineReportStore(DEFAULT_DB_PATH)
+                store.open()
+                sig, body = _function_signature_and_body(store, rec.get("file") or "", int(line_no or 0), repo_root, repo_commit, repo_dirty)
                 try:
-                    _update_observations(conn, line_id, cmd_or_note)
-                    tts.speak("Noted")
+                    store.close()
                 except Exception:
                     pass
+                if sig:
+                    tts.speak(f"Function: {sig}")
+                    while tts.is_speaking():
+                        time.sleep(0.05)
+                if recite_function == "full" and body:
+                    tts.speak("Body:")
+                    while tts.is_speaking():
+                        time.sleep(0.05)
+                    tts.speak(body)
+                    while tts.is_speaking():
+                        time.sleep(0.05)
+            except Exception:
+                pass
+
+        if mode == "manual":
+            # Block until user submits 'next', saving any other entered text as notes
+            while True:
+                cmd_or_note = _prompt("Note or 'next' (q to quit): ").strip()
+                low = cmd_or_note.lower()
+                if low in ("next", "n"):
+                    break
+                if low in ("quit", "q", "exit"):
+                    tts.speak("Stopping playback", interrupt=True)
+                    return
+                if cmd_or_note:
+                    try:
+                        _update_observations(conn, line_id, cmd_or_note)
+                        tts.speak("Noted")
+                    except Exception:
+                        pass
+        else:
+            # Auto mode: small pacing delay
+            time.sleep(max(0.05, delay_s))
 
     tts.speak("End of session")
 
@@ -341,6 +511,9 @@ def run_audio_interface(
     rate_wpm: int = 210,
     delay_s: float = 0.4,
     verbose: bool = False,
+    mode: str = "manual",
+    speak_scope: bool = True,
+    recite_function: str = "off",
 ) -> int:
     tts = MacSayTTS(voice=voice, rate_wpm=rate_wpm, verbose=verbose)
 
@@ -365,7 +538,15 @@ def run_audio_interface(
             return 0
         if verbose:
             print(f"[audio] Selected session: {session.session_id} {session.file}")
-        autoplay_session(conn, tts, session, delay_s=delay_s)
+        autoplay_session(
+            conn,
+            tts,
+            session,
+            delay_s=delay_s,
+            mode=mode,
+            speak_scope=speak_scope,
+            recite_function=recite_function,
+        )
 
     tts.stop()
     return 0
