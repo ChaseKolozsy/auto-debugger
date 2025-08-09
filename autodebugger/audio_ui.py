@@ -27,6 +27,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
 from .db import DEFAULT_DB_PATH
@@ -197,10 +198,29 @@ def summarize_delta(delta: Dict[str, Any], max_len: int = 120) -> str:
     return text
 
 
+def _format_session_time(start_time_iso: str) -> str:
+    try:
+        # Handle possible trailing 'Z' for UTC
+        st = start_time_iso.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(st)
+        # Convert to local time for user relevance
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        local_dt = dt.astimezone()
+        return f"{local_dt.day:02d} {local_dt.hour:02d}:{local_dt.minute:02d}:{local_dt.second:02d}"
+    except Exception:
+        return ""
+
+
 def speak_single_session_item(tts: MacSayTTS, idx: int, item: SessionItem) -> None:
     tts.speak(f"{idx}. {item.script_name}", interrupt=True)
     while tts.is_speaking():
         time.sleep(0.05)
+    ts = _format_session_time(item.start_time)
+    if ts:
+        tts.speak(f"Time: {ts}")
+        while tts.is_speaking():
+            time.sleep(0.05)
     tts.speak(f"Path: {item.file}")
     while tts.is_speaking():
         time.sleep(0.05)
