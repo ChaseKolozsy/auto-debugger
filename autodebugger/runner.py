@@ -370,6 +370,10 @@ class AutoDebugger:
                         thread_id = int(ev.body.get("threadId")) if ev.body else 0
                         reason = ev.body.get("reason") if ev.body else ""
                         
+                        # Track if we should step after processing
+                        should_step_after = True
+                        just_activated_manual = False  # Track if we just switched to manual mode
+                        
                         # Check if we should activate manual mode
                         if manual_from and not manual_mode_active and not manual_trigger_activated:
                             # Query stack to check location
@@ -386,6 +390,7 @@ class AutoDebugger:
                                     if file_check_abs == manual_trigger_file and line_check >= manual_trigger_line:
                                         manual_mode_active = True
                                         manual_trigger_activated = True  # Mark as activated
+                                        just_activated_manual = True  # Mark that we just activated
                                         if self._controller:
                                             self._controller.update_state(mode='manual')
                                         if self._tts:
@@ -665,25 +670,30 @@ class AutoDebugger:
                                 except Exception:
                                     pass
                                 running = False
+                                should_step_after = False
                                 break
                             elif action == 'auto':
                                 manual_mode_active = False
                                 if self._controller:
                                     self._controller.update_state(mode='auto')
                                 print("\n[manual] Switched to auto mode\n", flush=True)
+                                should_step_after = True  # Continue stepping in auto
                             elif action == 'continue':
                                 client.request("continue", {"threadId": thread_id})
+                                should_step_after = False  # Don't step, we already continued
                                 continue
-                            # Default: step
+                            # Default: step (should_step_after remains True)
                         else:
                             # Not in manual mode - continue stepping automatically
                             pass
                         
                         # Step into to capture lines inside function calls as well
-                        # But only if we're in manual mode or not using --manual-from
+                        # But only if appropriate based on mode and state
                         if manual_mode_active:
-                            # In manual mode, step after processing
-                            client.request("stepIn", {"threadId": thread_id})
+                            # In manual mode, only step if we processed an action
+                            # BUT not if we just activated manual mode this iteration
+                            if should_step_after and not just_activated_manual:
+                                client.request("stepIn", {"threadId": thread_id})
                         elif not manual_from:
                             # Not using --manual-from, always step (normal auto mode)
                             client.request("stepIn", {"threadId": thread_id})
