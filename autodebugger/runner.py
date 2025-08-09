@@ -100,6 +100,7 @@ class AutoDebugger:
         # Parse manual_from trigger
         manual_trigger_file: Optional[str] = None
         manual_trigger_line: int = 0
+        manual_trigger_activated = False  # Track if we've already activated from trigger
         if manual_from:
             parts = manual_from.rsplit(':', 1)
             if len(parts) == 2 and parts[1].isdigit():
@@ -191,6 +192,9 @@ class AutoDebugger:
             }
 
             # Send launch but do not block waiting for response yet
+            # If we have a manual_from trigger, we need to stop to check lines
+            effective_stop_on_entry = stop_on_entry or bool(manual_from)
+            
             launch_args = {
                 "name": "Python: AutoDebug",
                 "type": "python",
@@ -198,7 +202,7 @@ class AutoDebugger:
                 "console": "internalConsole",
                 "cwd": parent_dir or os.getcwd(),
                 "justMyCode": just_my_code,
-                "stopOnEntry": stop_on_entry,
+                "stopOnEntry": effective_stop_on_entry,
                 "showReturnValue": True,
                 "redirectOutput": True,
                 "env": env_vars,
@@ -229,7 +233,7 @@ class AutoDebugger:
             # Set breakpoints to ensure we stop early in manual mode
             try:
                 breakpoints: List[Dict[str, int]] = []
-                if manual or stop_on_entry:
+                if manual_mode_active or stop_on_entry:
                     # Set dense breakpoints on all likely executable lines
                     try:
                         with open(script_abs, "r", encoding="utf-8") as _sf:
@@ -261,8 +265,8 @@ class AutoDebugger:
             # Send configurationDone to start execution
             client.request("configurationDone", {}, wait=15.0)
             
-            # Force initial pause in manual mode
-            if manual:
+            # Force initial pause in manual mode (only if starting in manual, not waiting for trigger)
+            if manual_mode_active:
                 try:
                     # Get threads and pause them
                     thr = client.request("threads", {}, wait=5.0)
@@ -345,7 +349,7 @@ class AutoDebugger:
                         reason = ev.body.get("reason") if ev.body else ""
                         
                         # Check if we should activate manual mode
-                        if manual_from and not manual_mode_active:
+                        if manual_from and not manual_mode_active and not manual_trigger_activated:
                             # Query stack to check location
                             st_check = client.request("stackTrace", {"threadId": thread_id})
                             frames_check = st_check.body.get("stackFrames", []) if st_check.body else []
@@ -359,6 +363,7 @@ class AutoDebugger:
                                     file_check_abs = os.path.abspath(file_check)
                                     if file_check_abs == manual_trigger_file and line_check >= manual_trigger_line:
                                         manual_mode_active = True
+                                        manual_trigger_activated = True  # Mark as activated
                                         if self._controller:
                                             self._controller.update_state(mode='manual')
                                         if self._tts:
