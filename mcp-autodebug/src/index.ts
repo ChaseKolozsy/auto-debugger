@@ -87,6 +87,20 @@ const tools: Record<string, Tool> = {
       properties: { db: { type: 'string', nullable: true }, sessionId: { type: 'string' } },
     },
   },
+  addNote: {
+    name: 'addNote',
+    description: 'Add a note/observation to a specific line report (appends to existing observations)',
+    inputSchema: {
+      type: 'object',
+      required: ['lineReportId', 'note'],
+      properties: {
+        db: { type: 'string', nullable: true },
+        lineReportId: { type: 'integer', description: 'The line report ID to add a note to' },
+        note: { type: 'string', description: 'The note/observation to add' },
+        source: { type: 'string', default: 'llm', description: 'Source identifier (e.g., llm, agent, human)' }
+      },
+    },
+  },
 };
 
 async function main() {
@@ -145,6 +159,39 @@ async function main() {
              FROM line_reports WHERE session_id = ? AND status = 'error' ORDER BY id`
           ).all(sessionId);
           return { content: [{ type: 'json', json: rows }] };
+        }
+        case 'addNote': {
+          const { db: dbPath, lineReportId, note, source = 'llm' } = (args as any) || {};
+          const { db } = openDb(dbPath);
+          
+          // Get current observations
+          const current = db.prepare('SELECT observations FROM line_reports WHERE id = ?').get(lineReportId) as any;
+          if (!current) {
+            return { isError: true, error: `Line report ${lineReportId} not found` } as any;
+          }
+          
+          // Format the new note with timestamp and source
+          const timestamp = new Date().toISOString();
+          const formattedNote = `[${timestamp}] [${source}] ${note}\n`;
+          
+          // Append to existing observations
+          const newObservations = (current.observations || '') + formattedNote;
+          
+          // Update the database
+          const result = db.prepare('UPDATE line_reports SET observations = ? WHERE id = ?')
+            .run(newObservations, lineReportId);
+          
+          return { 
+            content: [{ 
+              type: 'json', 
+              json: { 
+                success: true, 
+                lineReportId, 
+                changes: result.changes,
+                note: formattedNote.trim()
+              } 
+            }] 
+          };
         }
         default:
           return { isError: true, error: `Unknown tool ${name}` } as any;

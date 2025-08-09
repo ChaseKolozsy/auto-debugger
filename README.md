@@ -45,11 +45,18 @@ Roadmap / TODOs
   - Summaries: "summarize last N lines"; "summarize session so far"; quick error summary
   - Cross-platform TTS fallback (e.g., `pyttsx3`) and selectable synthesizers
   - Config file for defaults (mode, rate, scope on/off, function recitation)
+  - Read notes/observations aloud during playback (distinguish between human, LLM, and other sources)
 
 - MCP server
   - getFunctionContext tool (sig/full) mirroring UI snapshot/commit/disk resolution
   - Navigation tools: aroundLine(sessionId, id, radius), byFile(sessionId, file), firstError(sessionId)
   - Autopsy tool: exportAutopsy(sessionId) with narrative (first crash, lead-up deltas, function/scope context)
+  - addNote tool: Allow LLMs to add observations/notes to specific line reports for collaborative debugging
+  - Real-time collaborative debugging modes:
+    - Batch mode: streamNotes tool that collects all human notes, then LLM applies all fixes in one go
+    - Progressive mode: Each note becomes a subtask that LLM completes immediately as notes are added
+    - Integration with claude-code, cursor-agent, cline, roo code, kilo code, and other MCP-compatible agents
+    - Agent routing: Specify which agent handles which note/task (e.g., "roo: refactor this", "claude: explain why", "cursor: optimize")
   - Transport: optional SSE server in addition to stdio
   - Talon grammar examples for common tool invocations
   - Safety: read-only mode and field redaction options for sensitive data
@@ -62,6 +69,8 @@ Roadmap / TODOs
 - Web UI parity
   - Add audio controls and navigation shortcuts analogous to CLI
   - Inline summaries and quick filters for errors/variables
+  - Display notes/observations in the web interface with source attribution (human, LLM, agent)
+  - Allow adding/editing notes directly from the web interface
 
 Selecting the Python interpreter / environments
 - The debugger can target any Python interpreter via `--python`, otherwise it uses the interpreter running the CLI (`sys.executable`). The specified interpreter must have `debugpy` installed.
