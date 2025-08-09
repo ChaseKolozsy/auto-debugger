@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import json
 import os
 import queue
@@ -23,95 +22,77 @@ def find_free_port() -> int:
 
 
 def extract_function_context(file_path: str, line: int) -> Dict[str, Any]:
-    """Extract function context for a given file and line."""
+    """Extract function context for a given file and line - optimized version."""
     if not file_path or not os.path.isfile(file_path):
         return {"name": None, "sig": None, "body": None}
     
     try:
         with open(file_path, "r", encoding="utf-8") as f:
-            source = f.read()
+            lines = f.readlines()
         
-        # Quick check: if line is too early for any function, skip AST parsing
-        lines = source.splitlines()
-        if line <= 1 or line > len(lines):
+        if line <= 0 or line > len(lines):
             return {"name": None, "sig": None, "body": None}
         
-        # Only parse if we're likely in a function (heuristic check)
-        # Look for 'def ' or 'class ' in previous lines
-        found_def = False
-        for i in range(max(0, line - 50), line):
+        # Simple heuristic: look backwards for def/class without AST parsing
+        func_name = None
+        func_sig = None
+        func_body_lines = []
+        
+        # Start from current line and go backwards
+        for i in range(line - 1, max(-1, line - 100), -1):
             if i < len(lines):
                 stripped = lines[i].strip()
-                if stripped.startswith(('def ', 'async def ', 'class ')):
-                    found_def = True
+                # Check indentation to see if we're still in the same scope
+                if i < line - 1:
+                    # If we hit a line with no indentation (except empty lines), we're out of the function
+                    if lines[i] and not lines[i][0].isspace() and not stripped.startswith('#'):
+                        # Unless it's a decorator
+                        if not stripped.startswith('@'):
+                            break
+                
+                if stripped.startswith(('def ', 'async def ')):
+                    # Found a function definition
+                    func_sig = lines[i].rstrip()
+                    # Extract name from signature
+                    if 'def ' in stripped:
+                        name_part = stripped.split('def ', 1)[1]
+                    else:
+                        name_part = stripped.split('async def ', 1)[1]
+                    func_name = name_part.split('(')[0].strip()
+                    
+                    # Get next few lines for body
+                    for j in range(i + 1, min(i + 6, len(lines))):
+                        if j < len(lines):
+                            func_body_lines.append(lines[j].rstrip())
+                    break
+                elif stripped.startswith('class '):
+                    # Found a class definition
+                    func_sig = lines[i].rstrip()
+                    func_name = stripped.split('class ', 1)[1].split('(')[0].split(':')[0].strip()
+                    # For classes, check if we're in __init__ or another method
+                    for j in range(i + 1, min(line, i + 50)):
+                        if j < len(lines):
+                            method_stripped = lines[j].strip()
+                            if method_stripped.startswith(('def ', 'async def ')):
+                                # We might be in a method
+                                if j <= line - 1:
+                                    # Update to the method
+                                    func_sig = lines[j].rstrip()
+                                    if 'def ' in method_stripped:
+                                        method_name = method_stripped.split('def ', 1)[1].split('(')[0].strip()
+                                    else:
+                                        method_name = method_stripped.split('async def ', 1)[1].split('(')[0].strip()
+                                    func_name = f"{func_name}.{method_name}"
+                                    func_body_lines = []
+                                    for k in range(j + 1, min(j + 6, len(lines))):
+                                        func_body_lines.append(lines[k].rstrip())
                     break
         
-        if not found_def:
-            return {"name": None, "sig": None, "body": None}
+        func_body = '\n'.join(func_body_lines[:5]) if func_body_lines else None
+        return {"name": func_name, "sig": func_sig, "body": func_body}
         
-        tree = ast.parse(source, filename=file_path)
     except Exception:
         return {"name": None, "sig": None, "body": None}
-    
-    def _extract_sig_and_body(source: str, node: ast.AST) -> Tuple[str, str]:
-        try:
-            # Just extract the signature line for now to avoid performance issues
-            lines = source.splitlines()
-            start_line = getattr(node, "lineno", 1) - 1
-            end_line = min(start_line + 10, len(lines))  # Limit to 10 lines for body preview
-            
-            sig = lines[start_line] if start_line < len(lines) else ""
-            body_lines = lines[start_line + 1:end_line]
-            body = "\n".join(body_lines[:5])  # Just show first 5 lines of body
-            if len(body_lines) > 5:
-                body += "\n    ..."
-            return sig, body
-        except Exception:
-            return "", ""
-    
-    class Visitor(ast.NodeVisitor):
-        def __init__(self):
-            self.result = {"name": None, "sig": None, "body": None}
-            self.stack: List[str] = []
-            self.found = False
-            
-        def visit_ClassDef(self, node: ast.ClassDef) -> None:
-            if self.found:
-                return
-            self.stack.append(node.name)
-            self.generic_visit(node)
-            self.stack.pop()
-            
-        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-            if self.found:
-                return
-            self._check_function(node)
-            if not self.found:
-                self.generic_visit(node)
-            
-        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-            if self.found:
-                return
-            self._check_function(node)
-            if not self.found:
-                self.generic_visit(node)
-            
-        def _check_function(self, node):
-            start = getattr(node, "lineno", None)
-            end = getattr(node, "end_lineno", None)
-            if isinstance(start, int) and isinstance(end, int):
-                if start <= line <= end:
-                    qual = ".".join(self.stack + [node.name]) if self.stack else node.name
-                    sig, body = _extract_sig_and_body(source, node)
-                    # Keep the most specific (innermost) function
-                    if self.result["name"] is None or (end - start) < len(self.result.get("body", "")):
-                        self.result = {"name": qual, "sig": sig, "body": body}
-                        if start == line:  # Exact match, stop searching
-                            self.found = True
-    
-    visitor = Visitor()
-    visitor.visit(tree)
-    return visitor.result
 
 
 class SharedState:
@@ -137,59 +118,40 @@ class SharedState:
             "function_panel_open": False  # Track if function panel is visible
         }
         self._function_cache = {}  # Cache function contexts by (file, line)
-        self._extraction_thread = None
     
     def update_state(self, **kwargs):
         # Check if we need to extract function context
-        needs_extraction = False
         file_path = kwargs.get("file")
         line = kwargs.get("line", 0)
         
-        with self._lock:
-            self._current_state.update(kwargs)
-            
-            # Check if file/line changed and we need extraction
-            if file_path and line > 0:
-                cache_key = (file_path, line)
-                if cache_key not in self._function_cache:
-                    needs_extraction = True
-                else:
-                    # Use cached result
-                    cached = self._function_cache[cache_key]
-                    self._current_state.update(cached)
-        
-        # Extract function context outside the lock
-        if needs_extraction:
-            self._async_extract_function(file_path, line)
-    
-    def _async_extract_function(self, file_path: str, line: int):
-        """Extract function context in a separate thread to avoid blocking."""
-        def extract():
-            try:
-                func_context = extract_function_context(file_path, line)
-                cache_key = (file_path, line)
-                
-                with self._lock:
-                    # Cache the result
+        # Extract function context BEFORE updating state (synchronously)
+        if file_path and line > 0:
+            cache_key = (file_path, line)
+            if cache_key not in self._function_cache:
+                # Extract synchronously
+                try:
+                    func_context = extract_function_context(file_path, line)
                     self._function_cache[cache_key] = {
                         "function_name": func_context["name"],
                         "function_sig": func_context["sig"],
                         "function_body": func_context["body"]
                     }
-                    
-                    # Update state if we're still on the same file/line
-                    if (self._current_state.get("file") == file_path and 
-                        self._current_state.get("line") == line):
-                        self._current_state.update(self._function_cache[cache_key])
-            except Exception:
-                pass  # Silently fail extraction
+                except Exception:
+                    self._function_cache[cache_key] = {
+                        "function_name": None,
+                        "function_sig": None,
+                        "function_body": None
+                    }
         
-        # Cancel previous extraction if still running
-        if self._extraction_thread and self._extraction_thread.is_alive():
-            return  # Skip if previous extraction still running
-        
-        self._extraction_thread = threading.Thread(target=extract, daemon=True)
-        self._extraction_thread.start()
+        with self._lock:
+            self._current_state.update(kwargs)
+            
+            # Apply cached function context if available
+            if file_path and line > 0:
+                cache_key = (file_path, line)
+                if cache_key in self._function_cache:
+                    self._current_state.update(self._function_cache[cache_key])
+    
     
     def get_state(self) -> Dict[str, Any]:
         with self._lock:
