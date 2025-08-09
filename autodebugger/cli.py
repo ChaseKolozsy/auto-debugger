@@ -62,7 +62,8 @@ def ui_cmd(db_path: Optional[str], host: str, port: int, open_browser: bool) -> 
 @click.option("--rate", default=210, show_default=True, type=int, help="Speech rate (words per minute)")
 @click.option("--no-voice", "no_voice", is_flag=True, default=False, help="Disable voice recognition (keyboard only)")
 @click.option("--delay", default=0.4, show_default=True, type=float, help="Delay between lines during autoplay (seconds)")
-def audio_cmd(db_path: Optional[str], voice: str, rate: int, no_voice: bool, delay: float) -> None:
+@click.option("--verbose", is_flag=True, default=False, help="Print spoken text and selection info to console")
+def audio_cmd(db_path: Optional[str], voice: str, rate: int, no_voice: bool, delay: float, verbose: bool) -> None:
     """macOS audio interface for reviewing sessions (TTS + optional voice commands)."""
     code = run_audio_interface(
         db_path=db_path,
@@ -70,6 +71,7 @@ def audio_cmd(db_path: Optional[str], voice: str, rate: int, no_voice: bool, del
         rate_wpm=rate,
         enable_voice=(not no_voice),
         delay_s=delay,
+        verbose=verbose,
     )
     # propagate exit code
     sys.exit(code)

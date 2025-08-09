@@ -33,11 +33,12 @@ from .db import DEFAULT_DB_PATH
 
 
 class MacSayTTS:
-    def __init__(self, voice: str = "Samantha", rate_wpm: int = 210) -> None:
+    def __init__(self, voice: str = "Samantha", rate_wpm: int = 210, verbose: bool = False) -> None:
         self.voice = voice
         self.rate_wpm = rate_wpm
         self._proc: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
+        self.verbose = verbose
 
     def speak(self, text: str, interrupt: bool = True) -> None:
         if not text:
@@ -54,6 +55,9 @@ class MacSayTTS:
             except FileNotFoundError:
                 print(f"[TTS] {text}")
                 self._proc = None
+            finally:
+                if self.verbose:
+                    print(f"[speak] {text}")
 
     def stop(self) -> None:
         with self._lock:
@@ -412,8 +416,9 @@ def run_audio_interface(
     rate_wpm: int = 210,
     enable_voice: bool = True,
     delay_s: float = 0.4,
+    verbose: bool = False,
 ) -> int:
-    tts = MacSayTTS(voice=voice, rate_wpm=rate_wpm)
+    tts = MacSayTTS(voice=voice, rate_wpm=rate_wpm, verbose=verbose)
     input_mgr = InputManager(enable_voice=enable_voice)
 
     def _sigint(_sig, _frm):
@@ -431,9 +436,13 @@ def run_audio_interface(
         return 2
 
     with open_db(path) as conn:
+        if verbose:
+            print(f"[audio] Opening DB: {path}")
         session = paginate_sessions(conn, tts, input_mgr)
         if not session:
             return 0
+        if verbose:
+            print(f"[audio] Selected session: {session.session_id} {session.file}")
         autoplay_session(conn, tts, session, input_mgr, delay_s=delay_s)
 
     input_mgr.stop()

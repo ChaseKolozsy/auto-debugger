@@ -11,7 +11,7 @@ Usage
 
 Audio review (macOS)
 - Review sessions by voice: `autodebug audio --db .autodebug/line_reports.db`
-- Options: `--voice Samantha`, `--rate 210`, `--no-voice` (keyboard only), `--delay 0.4`
+- Options: `--voice Samantha`, `--rate 210`, `--no-voice` (keyboard only), `--delay 0.4`, `--verbose`
 - Voice commands while selecting sessions (paged 0–9): say “okay” (select 0), a number 0–9 (“zero..nine”), or “next”. Keyboard fallback: Enter=0, digits 0–9, `n` next, `q` quit.
 - During playback: reads each executed line and summarizes variable changes; say “next” or press `n` to skip; `q` to quit.
 
