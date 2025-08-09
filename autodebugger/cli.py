@@ -58,7 +58,7 @@ def ui_cmd(db_path: Optional[str], host: str, port: int, open_browser: bool) -> 
 
 @main.command("audio")
 @click.option("--db", "db_path", type=click.Path(), default=None, help="SQLite DB path for reports.")
-@click.option("--voice", default="Samantha", show_default=True, help="macOS voice name for 'say'")
+@click.option("--voice", default=None, show_default=True, help="macOS voice name for 'say' (default system voice)")
 @click.option("--rate", default=210, show_default=True, type=int, help="Speech rate (words per minute)")
 @click.option("--no-voice", "no_voice", is_flag=True, default=False, help="Disable voice recognition (keyboard only)")
 @click.option("--delay", default=0.4, show_default=True, type=float, help="Delay between lines during autoplay (seconds)")

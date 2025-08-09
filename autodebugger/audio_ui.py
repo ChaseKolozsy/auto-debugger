@@ -33,8 +33,8 @@ from .db import DEFAULT_DB_PATH, LineReportStore
 
 
 class MacSayTTS:
-    def __init__(self, voice: str = "Samantha", rate_wpm: int = 210, verbose: bool = False) -> None:
-        self.voice = voice
+    def __init__(self, voice: Optional[str] = None, rate_wpm: int = 210, verbose: bool = False) -> None:
+        self.voice = voice  # None means use system default voice
         self.rate_wpm = rate_wpm
         self._proc: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
@@ -57,8 +57,12 @@ class MacSayTTS:
                 except Exception:
                     pass
             try:
+                args = ["say"]
+                if self.voice:
+                    args += ["-v", self.voice]
+                args += ["-r", str(self.rate_wpm), text]
                 self._proc = subprocess.Popen(
-                    ["say", "-v", self.voice, "-r", str(self.rate_wpm), text],
+                    args,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
