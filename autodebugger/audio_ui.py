@@ -358,31 +358,52 @@ def autoplay_session(
             text = prefix + "no code captured"
         tts.speak(text, interrupt=True)
 
-        # While speaking, user can type notes freely. They are captured once Enter is pressed.
-        # After speech completes, wait for an explicit 'next' to move on. Any other submitted
-        # line is recorded as an observation for this line and we continue waiting.
+        # While speaking, user can type notes freely; do not advance on 'next' until speech is done
         while tts.is_speaking():
             note = input_mgr.get_line_nowait()
-            if note not in (None, "", "next", "n"):
+            if note in ("quit", "q", "exit"):
+                tts.stop()
+                tts.speak("Stopping playback", interrupt=True)
+                return
+            if note not in (None, ""):
                 try:
                     _update_observations(conn, line_id, note)
                 except Exception:
                     pass
-            if note in ("quit", "q", "exit"):
-                tts.speak("Stopping playback", interrupt=True)
-                return
 
         summary = summarize_delta(delta)
         if summary and summary != "no changes":
             tts.speak(f"Changes: {summary}")
         else:
             tts.speak("No changes")
+        while tts.is_speaking():
+            note = input_mgr.get_line_nowait()
+            if note in ("quit", "q", "exit"):
+                tts.stop()
+                tts.speak("Stopping playback", interrupt=True)
+                return
+            if note not in (None, ""):
+                try:
+                    _update_observations(conn, line_id, note)
+                except Exception:
+                    pass
 
         if status == "error":
             if err:
                 tts.speak(f"Error: {err}")
             else:
                 tts.speak("An error occurred")
+            while tts.is_speaking():
+                note = input_mgr.get_line_nowait()
+                if note in ("quit", "q", "exit"):
+                    tts.stop()
+                    tts.speak("Stopping playback", interrupt=True)
+                    return
+                if note not in (None, ""):
+                    try:
+                        _update_observations(conn, line_id, note)
+                    except Exception:
+                        pass
 
         # Now wait until user submits 'next' (Enter), capturing any note lines meanwhile
         while True:
