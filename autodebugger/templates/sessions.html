@@ -4,13 +4,27 @@
   <meta charset="utf-8" />
   <title>AutoDebugger - Sessions</title>
   <style>
-    body { font-family: system-ui, sans-serif; margin: 24px; }
+    body { font-family: system-ui, sans-serif; margin: 24px; background: #ffffff; color:#111827; }
     header { display:flex; gap:16px; align-items:center; }
     table { border-collapse: collapse; width: 100%; margin-top: 12px; }
     th, td { border: 1px solid #ddd; padding: 8px; font-size: 14px; }
     th { background: #f7f7f7; text-align: left; }
     .count { font-weight: 600; }
+    .session-link { color: #111827; font-weight: 700; text-decoration: none; }
+    .session-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+    /* Dark mode to match other pages */
+    .dark body { background:#0b1020; color:#e5e7eb; }
+    .dark th, .dark td { border-color: #263041; }
+    .dark th { background: #0f172a; color:#e2e8f0; }
+    .dark .session-link { color: #93c5fd; }
   </style>
+  <script>
+    (function(){
+      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (prefersDark) document.documentElement.classList.add('dark');
+    })();
+  </script>
 </head>
 <body>
   <header>
@@ -40,7 +54,7 @@
     <tbody>
       {% for s in sessions %}
       <tr>
-        <td><a href="/session/{{s.session_id}}">{{s.session_id}}</a></td>
+        <td><a class="session-link" href="/session/{{s.session_id}}">{{s.session_id}}</a></td>
         <td>{{s.file}}</td>
         <td>{{s.language}}</td>
         <td class="count">{{s.total_lines_executed}}</td>
