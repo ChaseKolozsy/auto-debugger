@@ -60,7 +60,8 @@
       background: #fef3c7; /* amber-100 */ border: 1px solid #fde68a; /* amber-200 */
       text-align: center; color: #7c2d12; /* amber-900 */
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      overflow: hidden; position: relative; cursor: pointer;
+      /* Allow tooltip to overflow beyond banner */
+      overflow: visible; position: relative; cursor: pointer;
     }
     .current-line .path { font-size: 12px; color: #6b7280; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .current-line .code { font-size: 13px; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -172,7 +173,7 @@
       <div class="viz-title">Scope Visualizer</div>
       <div id="current-line" class="current-line" title="Current file:line">
         —
-        <div id="fn-tooltip" class="fn-tooltip" style="display:none;"></div>
+        <div id="fn-tooltip" class="fn-tooltip" style="display:none; pointer-events: none;"></div>
       </div>
       <div id="visualizer">
         <div class="faded" style="font-size:13px;">Awaiting selection…</div>
@@ -519,8 +520,8 @@
           codeEl2.className = 'code';
           codeEl2.textContent = code;
           // Attach click on banner (orange/yellow bar) to toggle tooltip if available
-          const sig = row.dataset.function_signature || row.dataset.funcSig || '';
-          const body = row.dataset.function_body || row.dataset.funcBody || '';
+          const sig = (row.getAttribute('data-function_signature') || '').replace(/\\n/g, '\n');
+          const body = (row.getAttribute('data-function_body') || '').replace(/\\n/g, '\n');
           if (sig || body) {
             const tooltip = document.getElementById('fn-tooltip');
             if (tooltip) {
@@ -540,7 +541,13 @@
               }
               tooltip.innerHTML = '';
               tooltip.appendChild(card);
-              const toggle = () => { tooltip.style.display = (tooltip.style.display === 'none' || !tooltip.style.display) ? 'block' : 'none'; };
+              const toggle = () => {
+                tooltip.style.display = (tooltip.style.display === 'none' || !tooltip.style.display) ? 'block' : 'none';
+                if (tooltip.style.display === 'block') {
+                  // Ensure tooltip stays centered above banner content
+                  tooltip.style.left = '50%';
+                }
+              };
               currentLineBanner.addEventListener('click', toggle);
               // Close tooltip when clicking outside the banner
               document.addEventListener('click', (ev) => {
