@@ -222,18 +222,38 @@ class AutoDebugger:
                         # Scopes -> variables
                         scopes = client.request("scopes", {"frameId": frame.get("id")})
                         vars_payload: Dict[str, Any] = {}
+                        skip_names = {"special variables", "function variables", "class variables"}
                         for sc in scopes.body.get("scopes", []) if scopes.body else []:
-                            name = sc.get("name")
+                            scope_name = str(sc.get("name"))
                             vr = sc.get("variablesReference")
                             if not vr:
                                 continue
                             vres = client.request("variables", {"variablesReference": vr})
                             var_list = vres.body.get("variables", []) if vres.body else []
-                            # Convert to simple name->value map for quick glance
-                            simple_map: Dict[str, Any] = {}
+                            scope_map: Dict[str, Any] = {}
                             for v in var_list:
-                                simple_map[str(v.get("name"))] = v.get("value")
-                            vars_payload[str(name)] = simple_map
+                                vname = str(v.get("name"))
+                                if vname in skip_names:
+                                    continue
+                                vvalue = v.get("value")
+                                scope_map[vname] = vvalue
+                                # Shallow expand user variables if expandable
+                                vref = v.get("variablesReference")
+                                if isinstance(vref, int) and vref > 0:
+                                    try:
+                                        child_res = client.request("variables", {"variablesReference": vref})
+                                        children = child_res.body.get("variables", []) if child_res.body else []
+                                        child_map: Dict[str, Any] = {}
+                                        for c in children[:30]:  # limit to first 30
+                                            cname = str(c.get("name"))
+                                            if cname in skip_names:
+                                                continue
+                                            child_map[cname] = c.get("value")
+                                        if child_map:
+                                            scope_map[vname] = {"value": vvalue, "children": child_map}
+                                    except Exception:
+                                        pass
+                            vars_payload[scope_name] = scope_map
 
                         # Status/error info
                         status = "success"

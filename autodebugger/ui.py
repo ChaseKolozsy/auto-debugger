@@ -122,21 +122,26 @@ def create_app(db_path: Optional[str] = None) -> Flask:
             tuple(params),
         )
         rows = cur.fetchall()
-        reports = [
-            {
+        import json as _json
+        reports = []
+        for r in rows:
+            try:
+                vars_obj = _json.loads(r[5] or '{}')
+            except Exception:
+                vars_obj = {}
+            reports.append({
                 "id": r[0],
                 "file": r[1],
                 "line_number": r[2],
                 "code": r[3],
                 "timestamp": r[4],
+                "variables": vars_obj,
                 "stack_depth": r[6],
                 "thread_id": r[7],
                 "status": r[8],
                 "error_type": r[9],
                 "error_message": r[10],
-            }
-            for r in rows
-        ]
+            })
         # Distinct files for quick filtering
         cur.execute("SELECT DISTINCT file FROM line_reports WHERE session_id=? ORDER BY file", (session_id,))
         files = [r[0] for r in cur.fetchall()]

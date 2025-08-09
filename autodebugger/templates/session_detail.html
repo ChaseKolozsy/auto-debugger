@@ -51,6 +51,7 @@
         <th>File</th>
         <th>Line</th>
         <th>Code</th>
+        <th>Variables</th>
         <th>Status</th>
         <th>Error</th>
         <th>When</th>
@@ -63,6 +64,14 @@
         <td style="max-width: 360px; word-break: break-all;">{{r.file}}</td>
         <td>{{r.line_number}}</td>
         <td style="max-width: 420px; word-break: break-all;"><code>{{r.code}}</code></td>
+        <td style="max-width: 420px; word-break: break-all;">
+          {% if r.variables %}
+            <details>
+              <summary>view</summary>
+              <pre style="white-space: pre-wrap;">{{ r.variables | tojson(indent=2) }}</pre>
+            </details>
+          {% endif %}
+        </td>
         <td>{{r.status}}</td>
         <td>{% if r.error_type %}{{r.error_type}}: {{r.error_message}}{% endif %}</td>
         <td>{{r.timestamp}}</td>
