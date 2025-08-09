@@ -36,6 +36,20 @@
     .badge-removed { background:#fef2f2; color:#991b1b; border:1px solid #ef444433; }
     .faded { opacity: 0.65; }
 
+    /* Quick highlights */
+    .highlights { display:flex; gap:8px; flex-wrap: wrap; margin-top: 8px; }
+    .chip { display:inline-flex; align-items:center; gap:6px; padding: 6px 10px; border-radius:999px; border:1px solid #e5e7eb; background:#ffffff; font-size: 12px; box-shadow: 0 1px 1px rgba(0,0,0,0.03); }
+    .chip .key { font-weight: 700; color:#111827; }
+    .chip .val { color:#111827; max-width: 380px; overflow:hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chip.changed { border-color:#10b98133; background:#ecfdf5; }
+    .chip.removed { border-color:#ef444433; background:#fef2f2; }
+    .chip.added { border-color:#3b82f633; background:#eff6ff; }
+
+    /* View options */
+    .options { display:flex; gap:8px; flex-wrap: wrap; margin-top: 8px; }
+    .toggle { font-size:12px; padding: 6px 10px; border-radius: 8px; border:1px solid #e5e7eb; background:#fff; cursor:pointer; }
+    .toggle.active { background:#111827; color:#fff; border-color:#111827; }
+
     /* Table interactivity */
     tbody tr { cursor: pointer; }
     tbody tr:hover { background: #fbfbfb; }
@@ -84,6 +98,13 @@
         <div class="legend-item"><span class="swatch swatch-removed"></span> removed</div>
         <div class="legend-item"><span class="swatch swatch-unchanged"></span> unchanged (faded)</div>
       </div>
+      <div class="options">
+        <button class="toggle" id="opt-show-libs" title="Show library modules / types">Libraries/Types</button>
+        <button class="toggle active" id="opt-show-scalars" title="Show simple scalars prominently">Scalars First</button>
+        <button class="toggle" id="opt-show-long" title="Expand long text values by default">Expand Long Text</button>
+      </div>
+      <div style="margin-top:8px; font-weight:600; color:#374151;">Quick highlights</div>
+      <div id="highlights" class="highlights"></div>
     </div>
     <div class="viz-card">
       <div class="viz-title">Scope Visualizer</div>
@@ -147,15 +168,109 @@
 
   <script>
     (function() {
+      const state = {
+        showLibs: false,
+        showScalarsFirst: true,
+        expandLong: false,
+        maxPreview: 120
+      };
+
       function isObject(value) {
         return value && typeof value === 'object' && !Array.isArray(value);
       }
 
       function renderValue(value) {
-        if (isObject(value)) {
-          return JSON.stringify(value);
-        }
+        if (isObject(value)) return JSON.stringify(value);
         return String(value);
+      }
+
+      function isLikelyLibOrType(key, valueStr) {
+        if (state.showLibs) return false;
+        const k = (key || '').toString();
+        const v = (valueStr || '').toString();
+        if (/^__.*__$/.test(k)) return true; // dunder vars
+        if (/^<module\s/.test(v)) return true;
+        if (/^<class\s/.test(v)) return true;
+        if (/^<function\s/.test(v)) return true;
+        if (v.includes('typing.')) return true;
+        if (v.includes("from '/") && v.includes('site-packages')) return true;
+        if (/^<.* at 0x[0-9a-fA-F]+>$/.test(v)) return true;
+        return false;
+      }
+
+      function isScalar(value) {
+        return (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean');
+      }
+
+      function truncate(text, limit) {
+        const t = String(text);
+        if (state.expandLong) return t;
+        if (t.length <= limit) return t;
+        return t.slice(0, limit - 1) + '…';
+      }
+
+      function getPath(obj, path) {
+        try {
+          return path.reduce((acc, k) => (acc == null ? undefined : acc[k]), obj);
+        } catch { return undefined; }
+      }
+
+      function collectFlatChanges(varsByScope, deltaByScope) {
+        const results = [];
+        const scopeNames = Array.from(new Set([...Object.keys(varsByScope||{}), ...Object.keys(deltaByScope||{})]));
+        for (const scopeName of scopeNames) {
+          const varsObj = (varsByScope && varsByScope[scopeName]) || {};
+          const deltaObj = (deltaByScope && deltaByScope[scopeName]) || {};
+          function walk(deltaNode, path) {
+            for (const key of Object.keys(deltaNode)) {
+              const val = deltaNode[key];
+              const newPath = path.concat([key]);
+              if (isObject(val)) {
+                walk(val, newPath);
+              } else {
+                const currentVal = getPath(varsObj, newPath);
+                results.push({ scopeName, keyPath: newPath, key: newPath.join('.'), value: currentVal, kind: (currentVal === undefined || currentVal === null) ? 'removed' : 'changed' });
+              }
+            }
+          }
+          walk(deltaObj, []);
+        }
+        return results;
+      }
+
+      function renderHighlights(variables, delta) {
+        const container = document.getElementById('highlights');
+        container.innerHTML = '';
+        const changes = collectFlatChanges(variables, delta);
+        if (changes.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'faded';
+          empty.textContent = 'No changes.';
+          container.appendChild(empty);
+          return;
+        }
+        // Prefer scalars; limit to 8
+        const preferred = changes.sort((a,b) => {
+          const av = a.value, bv = b.value;
+          const as = isScalar(av) ? 0 : 1;
+          const bs = isScalar(bv) ? 0 : 1;
+          return as - bs || a.key.length - b.key.length;
+        }).slice(0, 8);
+        for (const c of preferred) {
+          const chip = document.createElement('div');
+          chip.className = 'chip ' + (c.kind === 'removed' ? 'removed' : 'changed');
+          chip.title = `${c.scopeName} · ${c.key}`;
+          const keyEl = document.createElement('span');
+          keyEl.className = 'key';
+          keyEl.textContent = c.key.split('.').slice(-1)[0] + ':';
+          const valEl = document.createElement('span');
+          valEl.className = 'val';
+          const valText = isObject(c.value) ? '{…}' : renderValue(c.value);
+          valEl.textContent = truncate(valText, state.maxPreview);
+          chip.appendChild(keyEl);
+          chip.appendChild(valEl);
+          container.appendChild(chip);
+        }
       }
 
       function buildVarTree(scopeName, dataObj, deltaObj) {
@@ -169,7 +284,14 @@
         const list = document.createElement('ul');
         list.className = 'var-list';
 
-        const keys = Object.keys(dataObj || {}).sort();
+        // Filter and sort keys: scalars first when enabled
+        const keysRaw = Object.keys(dataObj || {});
+        const keys = keysRaw.filter(k => !isLikelyLibOrType(k, renderValue(dataObj[k]))).sort((a,b) => {
+          if (!state.showScalarsFirst) return a.localeCompare(b);
+          const as = isScalar(dataObj[a]) ? 0 : 1;
+          const bs = isScalar(dataObj[b]) ? 0 : 1;
+          return as - bs || a.localeCompare(b);
+        });
         const deltaKeys = Object.keys(deltaObj || {});
         const allKeys = Array.from(new Set([...keys, ...deltaKeys])).sort();
 
@@ -210,11 +332,24 @@
           val.className = 'var-val';
 
           if (isObject(value)) {
-            // Nested object; recurse with child delta if present
-            const child = buildNestedList(value, isObject(delta) ? delta : {});
-            val.appendChild(child);
+            // Summarize nested object
+            const summary = document.createElement('div');
+            const keysCount = Object.keys(value || {}).length;
+            summary.textContent = `{object · ${keysCount} keys}`;
+            summary.className = 'faded';
+            const details = document.createElement('details');
+            const summaryEl = document.createElement('summary');
+            summaryEl.textContent = 'expand';
+            details.appendChild(summaryEl);
+            details.appendChild(buildNestedList(value, isObject(delta) ? delta : {}));
+            val.appendChild(summary);
+            val.appendChild(details);
           } else {
-            val.textContent = renderValue(value);
+            const text = renderValue(value);
+            const span = document.createElement('span');
+            span.textContent = truncate(text, state.maxPreview);
+            span.title = text;
+            val.appendChild(span);
           }
           li.appendChild(val);
           list.appendChild(li);
@@ -312,6 +447,9 @@
           delta = JSON.parse(row.dataset.delta || '{}');
         } catch { delta = {}; }
 
+        // Quick highlights from delta
+        renderHighlights(variables, delta);
+
         const scopeNames = Array.from(new Set([...Object.keys(variables || {}), ...Object.keys(delta || {})])).sort();
         if (scopeNames.length === 0) {
           const empty = document.createElement('div');
@@ -342,6 +480,15 @@
         tr.classList.add('selected');
         renderVisualizer(tr);
       });
+
+      // Option toggles
+      const optLibs = document.getElementById('opt-show-libs');
+      const optScalars = document.getElementById('opt-show-scalars');
+      const optLong = document.getElementById('opt-show-long');
+      function rerender() { if (selected) renderVisualizer(selected); }
+      optLibs.addEventListener('click', () => { state.showLibs = !state.showLibs; optLibs.classList.toggle('active', state.showLibs); rerender(); });
+      optScalars.addEventListener('click', () => { state.showScalarsFirst = !state.showScalarsFirst; optScalars.classList.toggle('active', state.showScalarsFirst); rerender(); });
+      optLong.addEventListener('click', () => { state.expandLong = !state.expandLong; optLong.classList.toggle('active', state.expandLong); rerender(); });
 
       // Auto-select the first row if present
       const first = tbody.querySelector('tr');
