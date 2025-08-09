@@ -409,12 +409,20 @@ def autoplay_session(
     mode: str = "manual",  # "auto" or "manual"
     speak_scope: bool = True,
     recite_function: str = "off",  # "off" | "sig" | "full"
+    db_path: Optional[str] = None,
 ) -> None:
     tts.speak(f"Playing session {session.script_name}")
     while tts.is_speaking():
         time.sleep(0.05)
 
     any_lines = False
+    # Prepare function/source helpers once per session
+    repo_root, repo_commit, repo_dirty = _load_repo_provenance(conn, session.session_id)
+    store = LineReportStore(db_path or DEFAULT_DB_PATH)
+    try:
+        store.open()
+    except Exception:
+        pass
     for rec in iter_line_reports(conn, session.session_id):
         any_lines = True
         code = rec.get("code") or ""
@@ -466,14 +474,7 @@ def autoplay_session(
         # Optionally recite function context
         if recite_function in {"sig", "full"}:
             try:
-                repo_root, repo_commit, repo_dirty = _load_repo_provenance(conn, session.session_id)
-                store = LineReportStore(DEFAULT_DB_PATH)
-                store.open()
                 sig, body = _function_signature_and_body(store, rec.get("file") or "", int(line_no or 0), repo_root, repo_commit, repo_dirty, session.session_id)
-                try:
-                    store.close()
-                except Exception:
-                    pass
                 if sig:
                     tts.speak(f"Function: {sig}")
                     while tts.is_speaking():
@@ -491,13 +492,72 @@ def autoplay_session(
         if mode == "manual":
             # Block until user submits 'next', saving any other entered text as notes
             while True:
-                cmd_or_note = _prompt("Note or 'next' (q to quit): ").strip()
+                cmd_or_note = _prompt("Note or 'next' (commands: func|sig|full|body|repeat|scope|changes, q quit): ").strip()
                 low = cmd_or_note.lower()
                 if low in ("next", "n"):
                     break
                 if low in ("quit", "q", "exit"):
                     tts.speak("Stopping playback", interrupt=True)
                     return
+                # On-demand recitations
+                if low in ("func", "sig"):
+                    try:
+                        sig, _body = _function_signature_and_body(store, rec.get("file") or "", int(line_no or 0), repo_root, repo_commit, repo_dirty, session.session_id)
+                        if sig:
+                            tts.speak(f"Function: {sig}")
+                            while tts.is_speaking():
+                                time.sleep(0.05)
+                        else:
+                            tts.speak("Function not available")
+                            while tts.is_speaking():
+                                time.sleep(0.05)
+                    except Exception:
+                        tts.speak("Function not available")
+                        while tts.is_speaking():
+                            time.sleep(0.05)
+                    continue
+                if low in ("full", "body"):
+                    try:
+                        sig, body = _function_signature_and_body(store, rec.get("file") or "", int(line_no or 0), repo_root, repo_commit, repo_dirty, session.session_id)
+                        if sig:
+                            tts.speak(f"Function: {sig}")
+                            while tts.is_speaking():
+                                time.sleep(0.05)
+                        if body:
+                            tts.speak("Body:")
+                            while tts.is_speaking():
+                                time.sleep(0.05)
+                            tts.speak(body)
+                            while tts.is_speaking():
+                                time.sleep(0.05)
+                        if not sig and not body:
+                            tts.speak("Function not available")
+                            while tts.is_speaking():
+                                time.sleep(0.05)
+                    except Exception:
+                        tts.speak("Function not available")
+                        while tts.is_speaking():
+                            time.sleep(0.05)
+                    continue
+                if low in ("repeat", "r"):
+                    tts.speak(text, interrupt=True)
+                    while tts.is_speaking():
+                        time.sleep(0.05)
+                    continue
+                if low == "scope":
+                    try:
+                        brief = _format_scope_brief(rec.get("variables") or {})
+                        tts.speak(f"Scope: {brief}")
+                        while tts.is_speaking():
+                            time.sleep(0.05)
+                    except Exception:
+                        pass
+                    continue
+                if low == "changes":
+                    tts.speak(f"Changes: {summary}" if summary and summary != "no changes" else "No changes")
+                    while tts.is_speaking():
+                        time.sleep(0.05)
+                    continue
                 if cmd_or_note:
                     try:
                         _update_observations(conn, line_id, cmd_or_note)
@@ -513,6 +573,10 @@ def autoplay_session(
         while tts.is_speaking():
             time.sleep(0.05)
     tts.speak("End of session")
+    try:
+        store.close()
+    except Exception:
+        pass
 
 
 def run_audio_interface(
