@@ -15,7 +15,10 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import debugpy
 
-from .control import HttpStepController, prompt_for_action
+try:
+    from .enhanced_control import HttpStepController, prompt_for_action
+except ImportError:
+    from .control import HttpStepController, prompt_for_action
 from .dap_client import DapClient
 from .db import LineReport, LineReportStore, SessionSummary
 from .audio_ui import MacSayTTS, summarize_delta
@@ -525,6 +528,8 @@ class AutoDebugger:
                                     file=file_path,
                                     line=line,
                                     code=code,
+                                    variables=vars_payload,
+                                    variables_delta=variables_delta,
                                     waiting=True,
                                     mode='manual'
                                 )
@@ -534,6 +539,13 @@ class AutoDebugger:
                                 # Announce line
                                 announcement = f"Line {line}: {code}"
                                 self._tts.speak(announcement, interrupt=True)
+                                
+                                # Announce function context if available
+                                if self._controller and hasattr(self._controller.shared_state, 'get_state'):
+                                    state = self._controller.shared_state.get_state()
+                                    if state.get('function_name'):
+                                        func_announcement = f"In function {state['function_name']}"
+                                        self._tts.speak(func_announcement)
                                 
                                 # Summarize scope
                                 def _scope_brief(variables: Dict[str, Any], max_pairs: int = 10) -> str:

@@ -31,7 +31,12 @@ class SharedState:
             "line": 0,
             "code": "",
             "waiting": False,
-            "mode": "manual"
+            "mode": "manual",
+            "variables": {},
+            "variables_delta": {},
+            "function_name": None,
+            "function_sig": None,
+            "function_body": None
         }
     
     def update_state(self, **kwargs):
