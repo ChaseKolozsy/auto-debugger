@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>AutoDebugger - Sessions</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; }
+    header { display:flex; gap:16px; align-items:center; }
+    table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+    th, td { border: 1px solid #ddd; padding: 8px; font-size: 14px; }
+    th { background: #f7f7f7; text-align: left; }
+    .count { font-weight: 600; }
+  </style>
+</head>
+<body>
+  <header>
+    <h2>Sessions</h2>
+    <form method="get">
+      <label>Filter by entry point:</label>
+      <input type="text" name="entry" value="{{selected_entry or ''}}" style="min-width: 320px;" />
+      <button type="submit">Apply</button>
+      <a href="/">Reset</a>
+    </form>
+  </header>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Session</th>
+        <th>Entry</th>
+        <th>Lang</th>
+        <th>Lines</th>
+        <th>Errors</th>
+        <th>Crashes</th>
+        <th>Updated</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in sessions %}
+      <tr>
+        <td><a href="/session/{{s.session_id}}">{{s.session_id}}</a></td>
+        <td>{{s.file}}</td>
+        <td>{{s.language}}</td>
+        <td class="count">{{s.total_lines_executed}}</td>
+        <td class="count">{{s.lines_with_errors}}</td>
+        <td class="count">{{s.total_crashes}}</td>
+        <td>{{s.updated_at}}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>

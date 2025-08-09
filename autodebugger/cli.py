@@ -9,6 +9,7 @@ import click
 
 from .runner import AutoDebugger
 from .db import LineReportStore
+from .ui import create_app
 
 
 @click.group()
@@ -39,3 +40,16 @@ def export_cmd(db_path: Optional[str], session_id: str) -> None:
         click.echo(store.export_session_json(session_id))
     finally:
         store.close()
+
+
+@main.command("ui")
+@click.option("--db", "db_path", type=click.Path(), default=None, help="SQLite DB path for reports.")
+@click.option("--host", default="127.0.0.1", show_default=True)
+@click.option("--port", default=5001, show_default=True, type=int)
+@click.option("--open/--no-open", "open_browser", default=True)
+def ui_cmd(db_path: Optional[str], host: str, port: int, open_browser: bool) -> None:
+    app = create_app(db_path)
+    if open_browser:
+        import webbrowser
+        webbrowser.open(f"http://{host}:{port}/")
+    app.run(host=host, port=port)

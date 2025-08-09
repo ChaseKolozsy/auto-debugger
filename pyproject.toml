@@ -13,6 +13,7 @@ dependencies = [
   "debugpy>=1.8.0",
   "click>=8.1.7",
   "pydantic>=2.6.0",
+  "flask>=3.0.0",
 ]
 
 [project.scripts]

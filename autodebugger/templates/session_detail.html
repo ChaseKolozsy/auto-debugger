@@ -1,0 +1,74 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Session {{session.session_id if session else ''}}</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; }
+    header { display:flex; gap:16px; align-items:center; }
+    table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+    th, td { border: 1px solid #ddd; padding: 6px 8px; font-size: 13px; }
+    th { background: #f7f7f7; text-align: left; }
+    .filters { display:flex; gap:8px; align-items:center; }
+    .pill { padding: 2px 8px; border-radius: 999px; background: #eee; }
+    code { background:#f6f8fa; padding:2px 4px; border-radius:4px; }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="/">← Sessions</a>
+    <h2>Session {{session.session_id}}</h2>
+  </header>
+
+  <div>
+    <div>Entry: <code>{{session.file}}</code></div>
+    <div>Language: {{session.language}}</div>
+    <div>Lines: {{session.total_lines_executed}} | Errors: {{session.lines_with_errors}} | Crashes: {{session.total_crashes}}</div>
+  </div>
+
+  <form method="get" class="filters">
+    <label>File:</label>
+    <select name="file">
+      <option value="">All</option>
+      {% for f in files %}
+      <option value="{{f}}" {% if selected_file==f %}selected{% endif %}>{{f}}</option>
+      {% endfor %}
+    </select>
+    <label>Status:</label>
+    <select name="status">
+      <option value="">Any</option>
+      <option value="success" {% if selected_status=='success' %}selected{% endif %}>success</option>
+      <option value="error" {% if selected_status=='error' %}selected{% endif %}>error</option>
+      <option value="warning" {% if selected_status=='warning' %}selected{% endif %}>warning</option>
+    </select>
+    <button type="submit">Filter</button>
+  </form>
+
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>File</th>
+        <th>Line</th>
+        <th>Code</th>
+        <th>Status</th>
+        <th>Error</th>
+        <th>When</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in reports %}
+      <tr>
+        <td>{{r.id}}</td>
+        <td style="max-width: 360px; word-break: break-all;">{{r.file}}</td>
+        <td>{{r.line_number}}</td>
+        <td style="max-width: 420px; word-break: break-all;"><code>{{r.code}}</code></td>
+        <td>{{r.status}}</td>
+        <td>{% if r.error_type %}{{r.error_type}}: {{r.error_message}}{% endif %}</td>
+        <td>{{r.timestamp}}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>
