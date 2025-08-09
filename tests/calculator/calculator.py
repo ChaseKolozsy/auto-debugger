@@ -12,13 +12,13 @@ class Calculator:
     divider: Divide
 
     def add(self, a, b):
-        return self.adder.compute(a, b)
+        return self.adder.apply(a, b)
 
     def subtract(self, a, b):
-        return self.subtractor.compute(a, b)
+        return self.subtractor.apply(a, b)
 
     def multiply(self, a, b):
-        return self.multiplier.compute(a, b)
+        return self.multiplier.apply(a, b)
 
     def divide(self, a, b):
-        return self.divider.compute(a, b)
+        return self.divider.apply(a, b)
