@@ -615,13 +615,15 @@ class StepControlHandler(BaseHTTPRequestHandler):
             document.getElementById('line').textContent = state.line || '-';
             document.getElementById('function').textContent = state.function_name || '-';
             
-            // Check if we entered a new function (or left one)
+            // Check if we entered a new function
             if (state.function_name !== lastAnnouncedFunction) {
                 if (state.function_name) {
                     // We're in a new function
                     if (functionPanelOpen && state.audio_enabled) {
-                        // Panel is open and audio is on - announce the new function
-                        readFunctionContext();
+                        // Delay the function announcement to let the line finish speaking
+                        setTimeout(() => {
+                            readFunctionContext();
+                        }, 2000); // 2 second delay for line to finish
                     }
                 }
                 lastAnnouncedFunction = state.function_name;

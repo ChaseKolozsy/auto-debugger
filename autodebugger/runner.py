@@ -557,9 +557,6 @@ class AutoDebugger:
                                 announcement = f"Line {line}: {code}"
                                 self._tts.speak(announcement, interrupt=True)
                                 
-                                # Don't announce function here - let the web interface handle it
-                                # when the function panel is open
-                                
                                 # Summarize scope
                                 def _scope_brief(variables: Dict[str, Any], max_pairs: int = 10) -> str:
                                     try:
