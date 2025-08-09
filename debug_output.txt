@@ -2,3 +2,5 @@
 [manual-web] Open http://127.0.0.1:59365 to control stepping.
 
 [DEBUG] Function context for /Users/neweyesiss/AutoClaude/aXaTT/submodules/auto-debugger/test_functions.py:0: None
+[DEBUG] Function context for /Users/neweyesiss/AutoClaude/aXaTT/submodules/auto-debugger/test_functions.py:2: None
+[DEBUG] Function context for /Users/neweyesiss/AutoClaude/aXaTT/submodules/auto-debugger/test_functions.py:4: greet

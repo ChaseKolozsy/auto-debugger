@@ -36,52 +36,46 @@ def extract_function_context(file_path: str, line: int) -> Dict[str, Any]:
     
     def _extract_sig_and_body(source: str, node: ast.AST) -> Tuple[str, str]:
         try:
-            segment = ast.get_source_segment(source, node) or ""
+            # Just extract the signature line for now to avoid performance issues
+            lines = source.splitlines()
+            start_line = getattr(node, "lineno", 1) - 1
+            end_line = min(start_line + 10, len(lines))  # Limit to 10 lines for body preview
+            
+            sig = lines[start_line] if start_line < len(lines) else ""
+            body_lines = lines[start_line + 1:end_line]
+            body = "\n".join(body_lines[:5])  # Just show first 5 lines of body
+            if len(body_lines) > 5:
+                body += "\n    ..."
+            return sig, body
         except Exception:
-            segment = ""
-        lines = segment.splitlines()
-        if not lines:
             return "", ""
-        
-        # Capture signature lines up to the first line ending with ':'
-        sig_lines: List[str] = []
-        body_lines: List[str] = []
-        found_colon = False
-        for ln in lines:
-            sig_lines.append(ln)
-            if ln.rstrip().endswith(":"):
-                found_colon = True
-                break
-        if found_colon:
-            body_lines = lines[len(sig_lines):]
-        else:
-            sig_lines = [lines[0]] if lines else []
-            body_lines = lines[1:] if len(lines) > 1 else []
-        
-        sig = "\n".join(sig_lines).strip()
-        body = "\n".join(body_lines).strip()
-        # Truncate body for UI
-        if len(body) > 800:
-            body = body[:797] + "..."
-        return sig, body
     
     class Visitor(ast.NodeVisitor):
         def __init__(self):
             self.result = {"name": None, "sig": None, "body": None}
             self.stack: List[str] = []
+            self.found = False
             
         def visit_ClassDef(self, node: ast.ClassDef) -> None:
+            if self.found:
+                return
             self.stack.append(node.name)
             self.generic_visit(node)
             self.stack.pop()
             
         def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            if self.found:
+                return
             self._check_function(node)
-            self.generic_visit(node)
+            if not self.found:
+                self.generic_visit(node)
             
         def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+            if self.found:
+                return
             self._check_function(node)
-            self.generic_visit(node)
+            if not self.found:
+                self.generic_visit(node)
             
         def _check_function(self, node):
             start = getattr(node, "lineno", None)
@@ -93,6 +87,8 @@ def extract_function_context(file_path: str, line: int) -> Dict[str, Any]:
                     # Keep the most specific (innermost) function
                     if self.result["name"] is None or (end - start) < len(self.result.get("body", "")):
                         self.result = {"name": qual, "sig": sig, "body": body}
+                        if start == line:  # Exact match, stop searching
+                            self.found = True
     
     visitor = Visitor()
     visitor.visit(tree)
