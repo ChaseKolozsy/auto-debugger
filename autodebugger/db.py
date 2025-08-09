@@ -17,9 +17,9 @@ class LineReport:
     code: str
     timestamp: str
     variables: Dict[str, Any]
-    variables_delta: Optional[Dict[str, Any]] = None
     stack_depth: int
     thread_id: int
+    variables_delta: Optional[Dict[str, Any]] = None
     observations: Optional[str] = None
     status: str = "success"  # success | error | warning
     error_message: Optional[str] = None
@@ -50,6 +50,7 @@ class LineReportStore:
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.execute("PRAGMA journal_mode=WAL;")
         self._create_tables()
+        self._ensure_delta_column()
 
     def close(self) -> None:
         if self.conn is not None:
@@ -109,6 +110,18 @@ class LineReportStore:
             """
         )
         self.conn.commit()
+
+    def _ensure_delta_column(self) -> None:
+        assert self.conn is not None
+        cur = self.conn.cursor()
+        cur.execute("PRAGMA table_info(line_reports)")
+        cols = [r[1] for r in cur.fetchall()]
+        if "variables_delta" not in cols:
+            try:
+                cur.execute("ALTER TABLE line_reports ADD COLUMN variables_delta TEXT")
+                self.conn.commit()
+            except sqlite3.OperationalError:
+                pass
 
     def create_session(self, summary: SessionSummary) -> None:
         assert self.conn is not None
