@@ -60,8 +60,10 @@
       background: #fef3c7; /* amber-100 */ border: 1px solid #fde68a; /* amber-200 */
       text-align: center; color: #7c2d12; /* amber-900 */
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      overflow: hidden;
     }
+    .current-line .path { font-size: 12px; color: #6b7280; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .current-line .code { font-size: 13px; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
     /* Table interactivity */
     .table-container { max-height: 50vh; overflow: auto; margin-top: 12px; border: 1px solid #eee; border-radius: 8px; }
@@ -461,8 +463,16 @@
         viz.innerHTML = '';
         const currentLineBanner = document.getElementById('current-line');
         if (currentLineBanner) {
-          currentLineBanner.textContent = `${file}:${line} — ${code}`;
-          currentLineBanner.title = `${file}:${line}`;
+          currentLineBanner.innerHTML = '';
+          const pathEl = document.createElement('div');
+          pathEl.className = 'path';
+          pathEl.textContent = `${file}:${line}`;
+          pathEl.title = `${file}:${line}`;
+          const codeEl2 = document.createElement('div');
+          codeEl2.className = 'code';
+          codeEl2.textContent = code;
+          currentLineBanner.appendChild(pathEl);
+          currentLineBanner.appendChild(codeEl2);
         }
         const scopesGrid = document.createElement('div');
         scopesGrid.className = 'scopes-grid';
