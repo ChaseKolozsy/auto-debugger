@@ -317,12 +317,13 @@ def _function_signature_and_body(
     repo_root: Optional[str],
     commit: Optional[str],
     dirty: int,
+    session_id: str,
 ) -> tuple[Optional[str], Optional[str]]:
     # Reuse the logic from ui.py to choose source (snapshot -> committed -> disk)
     source: Optional[str] = None
     if int(dirty or 0) != 0:
         try:
-            snap = store.get_file_snapshot(store_session_id := store.conn.execute("SELECT ?", ("dummy",)).fetchone(), pyfile)  # type: ignore
+            snap = store.get_file_snapshot(session_id, pyfile)
         except Exception:
             snap = None
         if snap:
@@ -410,7 +411,12 @@ def autoplay_session(
     recite_function: str = "off",  # "off" | "sig" | "full"
 ) -> None:
     tts.speak(f"Playing session {session.script_name}")
+    while tts.is_speaking():
+        time.sleep(0.05)
+
+    any_lines = False
     for rec in iter_line_reports(conn, session.session_id):
+        any_lines = True
         code = rec.get("code") or ""
         line_no = rec.get("line_number")
         line_id = rec.get("id")
@@ -463,7 +469,7 @@ def autoplay_session(
                 repo_root, repo_commit, repo_dirty = _load_repo_provenance(conn, session.session_id)
                 store = LineReportStore(DEFAULT_DB_PATH)
                 store.open()
-                sig, body = _function_signature_and_body(store, rec.get("file") or "", int(line_no or 0), repo_root, repo_commit, repo_dirty)
+                sig, body = _function_signature_and_body(store, rec.get("file") or "", int(line_no or 0), repo_root, repo_commit, repo_dirty, session.session_id)
                 try:
                     store.close()
                 except Exception:
@@ -502,6 +508,10 @@ def autoplay_session(
             # Auto mode: small pacing delay
             time.sleep(max(0.05, delay_s))
 
+    if not any_lines:
+        tts.speak("No line reports found for this session")
+        while tts.is_speaking():
+            time.sleep(0.05)
     tts.speak("End of session")
 
 
