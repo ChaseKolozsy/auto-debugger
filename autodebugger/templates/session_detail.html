@@ -523,37 +523,39 @@
           const sig = (row.getAttribute('data-function_signature') || '').replace(/\\n/g, '\n');
           const body = (row.getAttribute('data-function_body') || '').replace(/\\n/g, '\n');
           if (sig || body) {
-            const tooltip = document.getElementById('fn-tooltip');
-            if (tooltip) {
-              const card = document.createElement('div');
-              card.className = 'card';
-              if (sig) {
-                const s = document.createElement('div');
-                s.className = 'sig';
-                s.textContent = sig;
-                card.appendChild(s);
-              }
-              if (body) {
-                const b = document.createElement('pre');
-                b.className = 'body';
-                b.textContent = body;
-                card.appendChild(b);
-              }
-              tooltip.innerHTML = '';
-              tooltip.appendChild(card);
-              const toggle = () => {
-                tooltip.style.display = (tooltip.style.display === 'none' || !tooltip.style.display) ? 'block' : 'none';
-                if (tooltip.style.display === 'block') {
-                  // Ensure tooltip stays centered above banner content
-                  tooltip.style.left = '50%';
-                }
-              };
-              currentLineBanner.addEventListener('click', toggle);
-              // Close tooltip when clicking outside the banner
-              document.addEventListener('click', (ev) => {
-                if (!currentLineBanner.contains(ev.target)) tooltip.style.display = 'none';
-              });
+            // Recreate tooltip each render to avoid stale references
+            const tooltip = document.createElement('div');
+            tooltip.id = 'fn-tooltip';
+            tooltip.className = 'fn-tooltip';
+            tooltip.style.display = 'none';
+            tooltip.style.pointerEvents = 'none';
+            const card = document.createElement('div');
+            card.className = 'card';
+            if (sig) {
+              const s = document.createElement('div');
+              s.className = 'sig';
+              s.textContent = sig;
+              card.appendChild(s);
             }
+            if (body) {
+              const b = document.createElement('pre');
+              b.className = 'body';
+              b.textContent = body;
+              card.appendChild(b);
+            }
+            tooltip.appendChild(card);
+            currentLineBanner.appendChild(tooltip);
+            const toggle = () => {
+              tooltip.style.display = (tooltip.style.display === 'none' || !tooltip.style.display) ? 'block' : 'none';
+              if (tooltip.style.display === 'block') {
+                tooltip.style.left = '50%';
+              }
+            };
+            // Assign instead of addEventListener to avoid stacking
+            currentLineBanner.onclick = (ev) => { ev.stopPropagation(); toggle(); };
+            document.addEventListener('click', (ev) => {
+              if (!currentLineBanner.contains(ev.target)) tooltip.style.display = 'none';
+            });
           }
           currentLineBanner.appendChild(pathEl);
           currentLineBanner.appendChild(codeEl2);
