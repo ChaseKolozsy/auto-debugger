@@ -50,6 +50,10 @@
     .toggle { font-size:12px; padding: 6px 10px; border-radius: 8px; border:1px solid #e5e7eb; background:#fff; cursor:pointer; }
     .toggle.active { background:#111827; color:#fff; border-color:#111827; }
 
+    /* Stepper */
+    .stepper { display:flex; gap:8px; align-items:center; margin-top: 8px; flex-wrap: wrap; }
+    .stepper .status { font-size: 12px; color:#6b7280; }
+
     /* Table interactivity */
     tbody tr { cursor: pointer; }
     tbody tr:hover { background: #fbfbfb; }
@@ -102,6 +106,11 @@
         <button class="toggle" id="opt-show-libs" title="Show library modules / types">Libraries/Types</button>
         <button class="toggle active" id="opt-show-scalars" title="Show simple scalars prominently">Scalars First</button>
         <button class="toggle" id="opt-show-long" title="Expand long text values by default">Expand Long Text</button>
+      </div>
+      <div class="stepper">
+        <button class="toggle" id="step-prev">◀︎ Back</button>
+        <button class="toggle" id="step-next">Step ▶︎</button>
+        <span id="stepper-status" class="status"></span>
       </div>
       <div style="margin-top:8px; font-weight:600; color:#374151;">Quick highlights</div>
       <div id="highlights" class="highlights"></div>
@@ -472,13 +481,25 @@
       const tbody = document.querySelector('tbody');
       if (!tbody) return;
       let selected = null;
-      tbody.addEventListener('click', function(e) {
-        const tr = e.target && (e.target.closest('tr'));
+      let rows = Array.from(tbody.querySelectorAll('tr'));
+      function updateStepperStatus() {
+        if (!selected) { document.getElementById('stepper-status').textContent = ''; return; }
+        const idx = rows.indexOf(selected);
+        if (idx >= 0) document.getElementById('stepper-status').textContent = `Row ${idx+1} of ${rows.length}`;
+      }
+      function selectRow(tr) {
         if (!tr) return;
         if (selected) selected.classList.remove('selected');
         selected = tr;
         tr.classList.add('selected');
+        tr.scrollIntoView({ behavior: 'smooth', block: 'center' });
         renderVisualizer(tr);
+        updateStepperStatus();
+      }
+      tbody.addEventListener('click', function(e) {
+        const tr = e.target && (e.target.closest('tr'));
+        if (!tr) return;
+        selectRow(tr);
       });
 
       // Option toggles
@@ -492,10 +513,25 @@
 
       // Auto-select the first row if present
       const first = tbody.querySelector('tr');
-      if (first) {
-        first.classList.add('selected');
-        renderVisualizer(first);
-      }
+      if (first) selectRow(first);
+
+      // Stepper controls
+      const btnPrev = document.getElementById('step-prev');
+      const btnNext = document.getElementById('step-next');
+      btnPrev.addEventListener('click', () => {
+        if (!selected) return;
+        const idx = rows.indexOf(selected);
+        if (idx > 0) selectRow(rows[idx-1]);
+      });
+      btnNext.addEventListener('click', () => {
+        if (!selected) return;
+        const idx = rows.indexOf(selected);
+        if (idx < rows.length - 1) selectRow(rows[idx+1]);
+      });
+
+      // Keep rows array in sync if table updates
+      const observer = new MutationObserver(() => { rows = Array.from(tbody.querySelectorAll('tr')); updateStepperStatus(); });
+      observer.observe(tbody, { childList: true, subtree: false });
     })();
   </script>
 </body>
