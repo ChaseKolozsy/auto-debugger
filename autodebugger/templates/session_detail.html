@@ -60,16 +60,16 @@
       background: #fef3c7; /* amber-100 */ border: 1px solid #fde68a; /* amber-200 */
       text-align: center; color: #7c2d12; /* amber-900 */
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      overflow: hidden;
+      overflow: hidden; position: relative; cursor: pointer;
     }
     .current-line .path { font-size: 12px; color: #6b7280; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .current-line .code { font-size: 13px; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
     /* Function tooltip */
     .fn-tooltip { position: absolute; transform: translate(-50%, 6px); left: 50%; z-index: 20; min-width: 320px; max-width: 70ch; white-space: pre-wrap; text-align: left; }
-    .fn-tooltip .card { background: #111827; color: #f9fafb; border: 1px solid #374151; border-radius: 10px; padding: 10px; box-shadow: 0 10px 20px rgba(0,0,0,0.25); }
-    .fn-tooltip .card .sig { font-weight: 700; color: #a7f3d0; margin-bottom: 6px; }
-    .fn-tooltip .card .body { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; line-height: 1.4; color: #e5e7eb; max-height: 40vh; overflow: auto; }
+    .fn-tooltip .card { background: #ffffff; color: #111827; border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px; box-shadow: 0 10px 20px rgba(0,0,0,0.15); }
+    .fn-tooltip .card .sig { font-weight: 700; color: #065f46; margin-bottom: 6px; }
+    .fn-tooltip .card .body { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; line-height: 1.4; color: #1f2937; max-height: 40vh; overflow: auto; }
 
     /* Table interactivity */
     .table-container { max-height: 50vh; overflow: auto; margin-top: 12px; border: 1px solid #eee; border-radius: 8px; }
@@ -84,12 +84,22 @@
     .dark .viz-meta { color:#94a3b8; }
     .dark .legend-item { color:#94a3b8; }
     .dark .var-item { background:#0f172a; border-color:#263041; }
+    .dark .var-key { color:#e5e7eb; }
+    .dark .var-val { color:#e5e7eb; }
     .dark .badge-changed { background:#052e2b; color:#a7f3d0; border-color:#10b98144; }
     .dark .badge-removed { background:#3f0d12; color:#fecaca; border-color:#ef444444; }
     .dark .table-container { border-color:#263041; }
     .dark tbody tr:hover { background:#0f172a; }
     .dark tbody tr.selected { background:#07263d; outline-color:#60a5fa; }
     .dark .current-line { background:#372f1b; border-color:#eab30855; color:#fde68a; }
+    .dark .current-line .path { color:#fef08a; }
+    .dark .current-line .code { color:#fef3c7; }
+    .dark code { background:#111827; color:#e5e7eb; }
+    .dark .chip { background:#1f2937; border-color:#374151; color:#e5e7eb; }
+    .dark .chip .key { color:#f9fafb; }
+    .dark .chip .val { color:#e5e7eb; }
+    .dark .chip.changed { background:#0b2f26; border-color:#115e59; color:#a7f3d0; }
+    .dark .chip.removed { background:#3f0d12; border-color:#7f1d1d; color:#fecaca; }
     .dark .fn-tooltip .card { background:#0b1220; color:#e5e7eb; border-color:#1f2a3a; }
     tbody tr { cursor: pointer; }
     tbody tr:hover { background: #fbfbfb; }
@@ -508,7 +518,7 @@
           const codeEl2 = document.createElement('div');
           codeEl2.className = 'code';
           codeEl2.textContent = code;
-          // Attach hover to show function tooltip if available
+          // Attach click on banner (orange/yellow bar) to toggle tooltip if available
           const sig = row.dataset.function_signature || row.dataset.funcSig || '';
           const body = row.dataset.function_body || row.dataset.funcBody || '';
           if (sig || body) {
@@ -530,9 +540,12 @@
               }
               tooltip.innerHTML = '';
               tooltip.appendChild(card);
-              codeEl2.addEventListener('mouseenter', () => { tooltip.style.display = 'block'; });
-              codeEl2.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
-              codeEl2.addEventListener('click', () => { tooltip.style.display = (tooltip.style.display === 'none') ? 'block' : 'none'; });
+              const toggle = () => { tooltip.style.display = (tooltip.style.display === 'none' || !tooltip.style.display) ? 'block' : 'none'; };
+              currentLineBanner.addEventListener('click', toggle);
+              // Close tooltip when clicking outside the banner
+              document.addEventListener('click', (ev) => {
+                if (!currentLineBanner.contains(ev.target)) tooltip.style.display = 'none';
+              });
             }
           }
           currentLineBanner.appendChild(pathEl);
