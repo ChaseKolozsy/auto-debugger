@@ -206,8 +206,8 @@ class AutoDebugger:
             }
 
             # Send launch but do not block waiting for response yet
-            # If we have a manual_from trigger, we need to stop to check lines
-            effective_stop_on_entry = stop_on_entry or bool(manual_from)
+            # Don't stop on entry if using --manual-from (we want to run to breakpoint)
+            effective_stop_on_entry = stop_on_entry and not manual_from
             
             launch_args = {
                 "name": "Python: AutoDebug",
@@ -244,10 +244,18 @@ class AutoDebugger:
                 client.request("setExceptionBreakpoints", {"filters": ["uncaught"], "filterOptions": []}, wait=10.0)
             except Exception:
                 pass
-            # Set breakpoints to ensure we stop early in manual mode
+            # Set breakpoints to ensure we stop at the right place
             try:
                 breakpoints: List[Dict[str, int]] = []
-                if manual_mode_active or stop_on_entry:
+                
+                if manual_from and manual_trigger_file and manual_trigger_line:
+                    # Set a breakpoint at the trigger line for --manual-from
+                    breakpoints = [{"line": manual_trigger_line}]
+                    client.request("setBreakpoints", {
+                        "source": {"path": manual_trigger_file},
+                        "breakpoints": breakpoints
+                    }, wait=10.0)
+                elif manual_mode_active or stop_on_entry:
                     # Set dense breakpoints on all likely executable lines
                     try:
                         with open(script_abs, "r", encoding="utf-8") as _sf:
@@ -269,11 +277,11 @@ class AutoDebugger:
                     except Exception:
                         # Fallback to line 1
                         breakpoints = [{"line": 1}]
-                
-                client.request("setBreakpoints", {
-                    "source": {"path": script_abs},
-                    "breakpoints": breakpoints
-                }, wait=10.0)
+                    
+                    client.request("setBreakpoints", {
+                        "source": {"path": script_abs},
+                        "breakpoints": breakpoints
+                    }, wait=10.0)
             except Exception:
                 pass
             # Send configurationDone to start execution
@@ -667,9 +675,23 @@ class AutoDebugger:
                                 client.request("continue", {"threadId": thread_id})
                                 continue
                             # Default: step
+                        else:
+                            # Not in manual mode - continue stepping automatically
+                            pass
                         
                         # Step into to capture lines inside function calls as well
-                        client.request("stepIn", {"threadId": thread_id})
+                        # But only if we're in manual mode or not using --manual-from
+                        if manual_mode_active:
+                            # In manual mode, step after processing
+                            client.request("stepIn", {"threadId": thread_id})
+                        elif not manual_from:
+                            # Not using --manual-from, always step (normal auto mode)
+                            client.request("stepIn", {"threadId": thread_id})
+                        else:
+                            # Using --manual-from but not yet in manual mode
+                            # Continue execution to reach the trigger line
+                            if not manual_trigger_activated:
+                                client.request("continue", {"threadId": thread_id})
 
                     elif ev.event == "continued":
                         # ignore
