@@ -12,6 +12,34 @@
     .filters { display:flex; gap:8px; align-items:center; }
     .pill { padding: 2px 8px; border-radius: 999px; background: #eee; }
     code { background:#f6f8fa; padding:2px 4px; border-radius:4px; }
+
+    /* Visualizer styles */
+    .viz-container { margin-top: 16px; display: grid; grid-template-columns: 1fr 2fr; gap: 16px; align-items: start; }
+    .viz-card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px; background: linear-gradient(180deg, #ffffff, #fafafa); box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+    .viz-title { font-weight: 600; margin-bottom: 8px; color: #374151; }
+    .viz-meta { font-size: 12px; color: #6b7280; display:flex; gap:8px; flex-wrap: wrap; }
+    .viz-legend { display:flex; gap:8px; margin-top: 8px; flex-wrap: wrap; }
+    .legend-item { display:flex; gap:6px; align-items:center; font-size:12px; color:#4b5563; }
+    .swatch { width:12px; height:12px; border-radius:3px; display:inline-block; border:1px solid rgba(0,0,0,0.08); }
+    .swatch-changed { background:#d1fae5; border-color:#10b98133; }
+    .swatch-removed { background:#fee2e2; border-color:#ef444433; }
+    .swatch-unchanged { background:#f3f4f6; }
+    .scopes-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+    .scope-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px; background:#ffffff; }
+    .scope-name { font-weight:600; color:#1f2937; margin-bottom:8px; font-size:13px; }
+    .var-list { list-style:none; padding-left:0; margin:0; }
+    .var-item { border: 1px dashed #e5e7eb; border-radius: 8px; padding: 6px 8px; margin: 6px 0; background: #fafafa; }
+    .var-key { font-weight:600; color:#374151; }
+    .var-val { color:#111827; word-break: break-word; }
+    .badge { display:inline-block; font-size: 10px; padding: 2px 6px; border-radius:999px; margin-left:6px; }
+    .badge-changed { background:#ecfdf5; color:#065f46; border:1px solid #10b98133; }
+    .badge-removed { background:#fef2f2; color:#991b1b; border:1px solid #ef444433; }
+    .faded { opacity: 0.65; }
+
+    /* Table interactivity */
+    tbody tr { cursor: pointer; }
+    tbody tr:hover { background: #fbfbfb; }
+    tbody tr.selected { outline: 2px solid #60a5fa; outline-offset: -2px; background:#f0f9ff; }
   </style>
 </head>
 <body>
@@ -44,6 +72,27 @@
     <button type="submit">Filter</button>
   </form>
 
+  <!-- Visualizer: updates when a row is clicked -->
+  <div class="viz-container">
+    <div class="viz-card">
+      <div class="viz-title">Selected Line</div>
+      <div id="viz-meta" class="viz-meta">
+        <span>No row selected. Click a row below to visualize scope changes.</span>
+      </div>
+      <div class="viz-legend">
+        <div class="legend-item"><span class="swatch swatch-changed"></span> changed / added</div>
+        <div class="legend-item"><span class="swatch swatch-removed"></span> removed</div>
+        <div class="legend-item"><span class="swatch swatch-unchanged"></span> unchanged (faded)</div>
+      </div>
+    </div>
+    <div class="viz-card">
+      <div class="viz-title">Scope Visualizer</div>
+      <div id="visualizer">
+        <div class="faded" style="font-size:13px;">Awaiting selection…</div>
+      </div>
+    </div>
+  </div>
+
   <table>
     <thead>
       <tr>
@@ -59,7 +108,15 @@
     </thead>
     <tbody>
       {% for r in reports %}
-      <tr>
+      <tr
+        data-id='{{ r.id }}'
+        data-file='{{ r.file }}'
+        data-line='{{ r.line_number }}'
+        data-code='{{ r.code }}'
+        data-status='{{ r.status }}'
+        data-variables='{{ r.variables | tojson }}'
+        data-delta='{{ r.variables_delta | tojson }}'
+      >
         <td>{{r.id}}</td>
         <td style="max-width: 360px; word-break: break-all;">{{r.file}}</td>
         <td>{{r.line_number}}</td>
@@ -87,5 +144,212 @@
       {% endfor %}
     </tbody>
   </table>
+
+  <script>
+    (function() {
+      function isObject(value) {
+        return value && typeof value === 'object' && !Array.isArray(value);
+      }
+
+      function renderValue(value) {
+        if (isObject(value)) {
+          return JSON.stringify(value);
+        }
+        return String(value);
+      }
+
+      function buildVarTree(scopeName, dataObj, deltaObj) {
+        const card = document.createElement('div');
+        card.className = 'scope-card';
+        const title = document.createElement('div');
+        title.className = 'scope-name';
+        title.textContent = scopeName;
+        card.appendChild(title);
+
+        const list = document.createElement('ul');
+        list.className = 'var-list';
+
+        const keys = Object.keys(dataObj || {}).sort();
+        const deltaKeys = Object.keys(deltaObj || {});
+        const allKeys = Array.from(new Set([...keys, ...deltaKeys])).sort();
+
+        for (const key of allKeys) {
+          const value = dataObj ? dataObj[key] : undefined;
+          const delta = deltaObj ? deltaObj[key] : undefined;
+
+          const li = document.createElement('li');
+          li.className = 'var-item';
+
+          const label = document.createElement('div');
+          const keyEl = document.createElement('span');
+          keyEl.className = 'var-key';
+          keyEl.textContent = key;
+          label.appendChild(keyEl);
+
+          if (delta !== undefined) {
+            const badge = document.createElement('span');
+            if (delta === null || delta === undefined) {
+              badge.className = 'badge badge-removed';
+              badge.textContent = 'removed';
+            } else if (isObject(delta)) {
+              badge.className = 'badge badge-changed';
+              badge.textContent = 'modified';
+            } else {
+              badge.className = 'badge badge-changed';
+              // Heuristic: treat as added/changed
+              badge.textContent = (key in (dataObj || {})) ? 'changed' : 'added';
+            }
+            label.appendChild(badge);
+          } else {
+            label.classList.add('faded');
+          }
+
+          li.appendChild(label);
+
+          const val = document.createElement('div');
+          val.className = 'var-val';
+
+          if (isObject(value)) {
+            // Nested object; recurse with child delta if present
+            const child = buildNestedList(value, isObject(delta) ? delta : {});
+            val.appendChild(child);
+          } else {
+            val.textContent = renderValue(value);
+          }
+          li.appendChild(val);
+          list.appendChild(li);
+        }
+
+        card.appendChild(list);
+        return card;
+      }
+
+      function buildNestedList(obj, delta) {
+        const innerList = document.createElement('ul');
+        innerList.className = 'var-list';
+        const keys = Object.keys(obj || {}).sort();
+        const deltaKeys = Object.keys(delta || {});
+        const allKeys = Array.from(new Set([...keys, ...deltaKeys])).sort();
+        for (const key of allKeys) {
+          const val = obj ? obj[key] : undefined;
+          const d = delta ? delta[key] : undefined;
+
+          const li = document.createElement('li');
+          li.className = 'var-item';
+          const header = document.createElement('div');
+          const k = document.createElement('span');
+          k.className = 'var-key';
+          k.textContent = key;
+          header.appendChild(k);
+
+          if (d !== undefined) {
+            const badge = document.createElement('span');
+            if (d === null || d === undefined) {
+              badge.className = 'badge badge-removed';
+              badge.textContent = 'removed';
+            } else if (isObject(d)) {
+              badge.className = 'badge badge-changed';
+              badge.textContent = 'modified';
+            } else {
+              badge.className = 'badge badge-changed';
+              badge.textContent = (key in (obj || {})) ? 'changed' : 'added';
+            }
+            header.appendChild(badge);
+          } else {
+            header.classList.add('faded');
+          }
+
+          li.appendChild(header);
+          const valEl = document.createElement('div');
+          valEl.className = 'var-val';
+          if (isObject(val)) {
+            valEl.appendChild(buildNestedList(val, isObject(d) ? d : {}));
+          } else {
+            valEl.textContent = renderValue(val);
+          }
+          li.appendChild(valEl);
+          innerList.appendChild(li);
+        }
+        return innerList;
+      }
+
+      function renderVisualizer(row) {
+        const viz = document.getElementById('visualizer');
+        const vizMeta = document.getElementById('viz-meta');
+        if (!row) {
+          viz.innerHTML = '<div class="faded" style="font-size:13px;">Awaiting selection…</div>';
+          vizMeta.textContent = 'No row selected. Click a row below to visualize scope changes.';
+          return;
+        }
+
+        // Meta panel
+        const file = row.dataset.file;
+        const line = row.dataset.line;
+        const code = row.dataset.code;
+        const status = row.dataset.status;
+        vizMeta.innerHTML = '';
+        const parts = [
+          `<span><strong>File:</strong> <code>${file}</code></span>`,
+          `<span><strong>Line:</strong> ${line}</span>`,
+          `<span><strong>Status:</strong> ${status}</span>`,
+        ];
+        const codeEl = document.createElement('div');
+        codeEl.style.marginTop = '6px';
+        codeEl.innerHTML = `<code>${code}</code>`;
+        vizMeta.innerHTML = parts.join(' \u2022 ');
+        vizMeta.appendChild(codeEl);
+
+        // Visualizer grid of scopes
+        viz.innerHTML = '';
+        const scopesGrid = document.createElement('div');
+        scopesGrid.className = 'scopes-grid';
+
+        let variables, delta;
+        try {
+          variables = JSON.parse(row.dataset.variables || '{}');
+        } catch { variables = {}; }
+        try {
+          delta = JSON.parse(row.dataset.delta || '{}');
+        } catch { delta = {}; }
+
+        const scopeNames = Array.from(new Set([...Object.keys(variables || {}), ...Object.keys(delta || {})])).sort();
+        if (scopeNames.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'faded';
+          empty.textContent = 'No variables captured.';
+          viz.appendChild(empty);
+          return;
+        }
+
+        for (const scopeName of scopeNames) {
+          const sVars = variables ? variables[scopeName] : undefined;
+          const sDelta = delta ? delta[scopeName] : undefined;
+          scopesGrid.appendChild(buildVarTree(scopeName, sVars || {}, sDelta || {}));
+        }
+
+        viz.appendChild(scopesGrid);
+      }
+
+      // Hook up table row clicks
+      const tbody = document.querySelector('tbody');
+      if (!tbody) return;
+      let selected = null;
+      tbody.addEventListener('click', function(e) {
+        const tr = e.target && (e.target.closest('tr'));
+        if (!tr) return;
+        if (selected) selected.classList.remove('selected');
+        selected = tr;
+        tr.classList.add('selected');
+        renderVisualizer(tr);
+      });
+
+      // Auto-select the first row if present
+      const first = tbody.querySelector('tr');
+      if (first) {
+        first.classList.add('selected');
+        renderVisualizer(first);
+      }
+    })();
+  </script>
 </body>
 </html>
