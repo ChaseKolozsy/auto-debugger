@@ -17,6 +17,7 @@ class LineReport:
     code: str
     timestamp: str
     variables: Dict[str, Any]
+    variables_delta: Optional[Dict[str, Any]] = None
     stack_depth: int
     thread_id: int
     observations: Optional[str] = None
@@ -68,6 +69,7 @@ class LineReportStore:
               code TEXT NOT NULL,
               timestamp TEXT NOT NULL,
               variables TEXT,
+              variables_delta TEXT,
               stack_depth INTEGER,
               thread_id INTEGER,
               observations TEXT,
@@ -152,9 +154,9 @@ class LineReportStore:
             """
             INSERT INTO line_reports(
               session_id,file,line_number,code,timestamp,
-              variables,stack_depth,thread_id,observations,
+              variables,variables_delta,stack_depth,thread_id,observations,
               status,error_message,error_type,stack_trace
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 report.session_id,
@@ -163,6 +165,7 @@ class LineReportStore:
                 report.code,
                 report.timestamp,
                 json.dumps(report.variables or {}),
+                json.dumps(report.variables_delta or {}),
                 report.stack_depth,
                 report.thread_id,
                 report.observations,

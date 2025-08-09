@@ -72,7 +72,15 @@
             </details>
           {% endif %}
         </td>
-        <td>{{r.status}}</td>
+        <td>
+          {{r.status}}
+          {% if r.variables_delta %}
+            <details>
+              <summary>delta</summary>
+              <pre style="white-space: pre-wrap;">{{ r.variables_delta | tojson(indent=2) }}</pre>
+            </details>
+          {% endif %}
+        </td>
         <td>{% if r.error_type %}{{r.error_type}}: {{r.error_message}}{% endif %}</td>
         <td>{{r.timestamp}}</td>
       </tr>

@@ -187,6 +187,7 @@ class AutoDebugger:
             # Event loop: collect stopped events and fetch scopes/variables, emit line reports until terminated
             threads: Dict[int, None] = {}
             running = True
+            prev_vars: Dict[str, Any] = {}
             while running:
                 events = client.pop_events()
                 # If nothing arrived, small sleep to avoid spin
@@ -285,6 +286,25 @@ class AutoDebugger:
                             except Exception:
                                 pass
 
+                        # Compute delta vs previous captured vars
+                        def compute_delta(curr: Dict[str, Any], prev: Dict[str, Any]) -> Dict[str, Any]:
+                            delta: Dict[str, Any] = {}
+                            keys = set(curr.keys()) | set(prev.keys())
+                            for k in sorted(keys):
+                                cv = curr.get(k)
+                                pv = prev.get(k)
+                                if isinstance(cv, dict) and isinstance(pv, dict):
+                                    sub = compute_delta(cv, pv)
+                                    if sub:
+                                        delta[k] = sub
+                                else:
+                                    if cv != pv:
+                                        delta[k] = cv
+                            return delta
+
+                        variables_delta = compute_delta(vars_payload, prev_vars)
+                        prev_vars = vars_payload
+
                         self.db.add_line_report(
                             LineReport(
                                 session_id=self.session_id,
@@ -293,6 +313,7 @@ class AutoDebugger:
                                 code=code,
                                 timestamp=utc_now_iso(),
                                 variables=vars_payload,
+                                variables_delta=variables_delta,
                                 stack_depth=len(frames),
                                 thread_id=thread_id,
                                 observations=None,

@@ -117,7 +117,7 @@ def create_app(db_path: Optional[str] = None) -> Flask:
             params.append(status)
         where = " AND ".join(parts)
         cur.execute(
-            "SELECT id, file, line_number, code, timestamp, variables, stack_depth, thread_id, status, error_type, error_message "
+            "SELECT id, file, line_number, code, timestamp, variables, variables_delta, stack_depth, thread_id, status, error_type, error_message "
             f"FROM line_reports WHERE {where} ORDER BY id",
             tuple(params),
         )
@@ -129,6 +129,10 @@ def create_app(db_path: Optional[str] = None) -> Flask:
                 vars_obj = _json.loads(r[5] or '{}')
             except Exception:
                 vars_obj = {}
+            try:
+                delta_obj = _json.loads(r[6] or '{}')
+            except Exception:
+                delta_obj = {}
             reports.append({
                 "id": r[0],
                 "file": r[1],
@@ -136,11 +140,12 @@ def create_app(db_path: Optional[str] = None) -> Flask:
                 "code": r[3],
                 "timestamp": r[4],
                 "variables": vars_obj,
-                "stack_depth": r[6],
-                "thread_id": r[7],
-                "status": r[8],
-                "error_type": r[9],
-                "error_message": r[10],
+                "variables_delta": delta_obj,
+                "stack_depth": r[7],
+                "thread_id": r[8],
+                "status": r[9],
+                "error_type": r[10],
+                "error_message": r[11],
             })
         # Distinct files for quick filtering
         cur.execute("SELECT DISTINCT file FROM line_reports WHERE session_id=? ORDER BY file", (session_id,))
