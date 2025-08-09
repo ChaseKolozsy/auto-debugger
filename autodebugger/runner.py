@@ -114,20 +114,44 @@ class AutoDebugger:
                 "supportsVariableType": True,
                 "supportsVariablePaging": True,
             }, wait=15.0)
+            # Choose best launch strategy: module for packages, program for single files
+            script_dir = os.path.dirname(script_abs)
+            parent_dir = os.path.dirname(script_dir)
+            module_name: Optional[str] = None
+            if os.path.exists(os.path.join(script_dir, "__init__.py")):
+                # Derive module path relative to parent on sys.path
+                pkg = os.path.basename(script_dir)
+                base = os.path.basename(parent_dir)
+                # If parent is tests (e.g., tests/calculator), import as calculator.main
+                if base == "tests":
+                    module_name = f"{pkg}.main"
+                else:
+                    module_name = f"{pkg}.main"
+
+            env_vars = {
+                "PYTHONPATH": os.pathsep.join(filter(None, [os.environ.get("PYTHONPATH"), parent_dir]))
+            }
+
             # Send launch but do not block waiting for response yet
-            launch_seq = client.send_request("launch", {
-                "name": "Python: Current File",
+            launch_args = {
+                "name": "Python: AutoDebug",
                 "type": "python",
                 "request": "launch",
-                "program": script_abs,
-                "args": args or [],
                 "console": "internalConsole",
-                "cwd": os.path.dirname(script_abs) or os.getcwd(),
+                "cwd": parent_dir or os.getcwd(),
                 "justMyCode": just_my_code,
                 "stopOnEntry": stop_on_entry,
                 "showReturnValue": True,
                 "redirectOutput": True,
-            })
+                "env": env_vars,
+                "args": args or [],
+            }
+            if module_name:
+                launch_args.update({"module": module_name})
+            else:
+                launch_args.update({"program": script_abs})
+
+            launch_seq = client.send_request("launch", launch_args)
             # Wait for 'initialized' event from adapter before sending breakpoints/configuration
             start_wait = time.time()
             initialized_seen = False
