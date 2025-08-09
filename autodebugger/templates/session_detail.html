@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>Session {{session.session_id if session else ''}}</title>
   <style>
-    body { font-family: system-ui, sans-serif; margin: 24px; }
+    body { font-family: system-ui, sans-serif; margin: 24px; background: #ffffff; color:#111827; }
     header { display:flex; gap:16px; align-items:center; }
     table { border-collapse: collapse; width: 100%; margin-top: 12px; }
     th, td { border: 1px solid #ddd; padding: 6px 8px; font-size: 13px; }
@@ -65,13 +65,43 @@
     .current-line .path { font-size: 12px; color: #6b7280; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .current-line .code { font-size: 13px; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+    /* Function tooltip */
+    .fn-tooltip { position: absolute; transform: translate(-50%, 6px); left: 50%; z-index: 20; min-width: 320px; max-width: 70ch; white-space: pre-wrap; text-align: left; }
+    .fn-tooltip .card { background: #111827; color: #f9fafb; border: 1px solid #374151; border-radius: 10px; padding: 10px; box-shadow: 0 10px 20px rgba(0,0,0,0.25); }
+    .fn-tooltip .card .sig { font-weight: 700; color: #a7f3d0; margin-bottom: 6px; }
+    .fn-tooltip .card .body { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; line-height: 1.4; color: #e5e7eb; max-height: 40vh; overflow: auto; }
+
     /* Table interactivity */
     .table-container { max-height: 50vh; overflow: auto; margin-top: 12px; border: 1px solid #eee; border-radius: 8px; }
     .table-container table { border: none; margin: 0; width: 100%; }
+
+    /* Dark mode overrides */
+    .dark body { background:#0b1020; color:#e5e7eb; }
+    .dark th, .dark td { border-color: #263041; }
+    .dark th { background: #0f172a; color:#e2e8f0; }
+    .dark .viz-card { background: linear-gradient(180deg, #0f172a, #0b1020); border-color:#263041; box-shadow: 0 1px 2px rgba(0,0,0,0.4); }
+    .dark .viz-title { color:#e5e7eb; }
+    .dark .viz-meta { color:#94a3b8; }
+    .dark .legend-item { color:#94a3b8; }
+    .dark .var-item { background:#0f172a; border-color:#263041; }
+    .dark .badge-changed { background:#052e2b; color:#a7f3d0; border-color:#10b98144; }
+    .dark .badge-removed { background:#3f0d12; color:#fecaca; border-color:#ef444444; }
+    .dark .table-container { border-color:#263041; }
+    .dark tbody tr:hover { background:#0f172a; }
+    .dark tbody tr.selected { background:#07263d; outline-color:#60a5fa; }
+    .dark .current-line { background:#372f1b; border-color:#eab30855; color:#fde68a; }
+    .dark .fn-tooltip .card { background:#0b1220; color:#e5e7eb; border-color:#1f2a3a; }
     tbody tr { cursor: pointer; }
     tbody tr:hover { background: #fbfbfb; }
     tbody tr.selected { outline: 2px solid #60a5fa; outline-offset: -2px; background:#f0f9ff; }
   </style>
+  <script>
+    (function(){
+      // basic prefers-color-scheme dark mode with toggle
+      const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (isDark) document.documentElement.classList.add('dark');
+    })();
+  </script>
 </head>
 <body>
   <header>
@@ -130,7 +160,10 @@
     </div>
     <div class="viz-card">
       <div class="viz-title">Scope Visualizer</div>
-      <div id="current-line" class="current-line" title="Current file:line">—</div>
+      <div id="current-line" class="current-line" title="Current file:line">
+        —
+        <div id="fn-tooltip" class="fn-tooltip" style="display:none;"></div>
+      </div>
       <div id="visualizer">
         <div class="faded" style="font-size:13px;">Awaiting selection…</div>
       </div>
@@ -162,6 +195,8 @@
         data-variables='{{ r.variables | tojson }}'
         data-delta='{{ r.variables_delta | tojson }}'
         {% if r.function %}data-func='{{ r.function }}'{% endif %}
+        {% if r.function_signature %}data-function_signature='{{ r.function_signature | replace("'", "&#39;") | replace('"', '&quot;') | replace("\n", "\\n") }}'{% endif %}
+        {% if r.function_body %}data-function_body='{{ r.function_body | replace("'", "&#39;") | replace('"', '&quot;') | replace("\n", "\\n") }}'{% endif %}
       >
         <td>{{r.id}}</td>
         <td style="max-width: 360px; word-break: break-all;">{{r.file}}</td>
@@ -473,6 +508,33 @@
           const codeEl2 = document.createElement('div');
           codeEl2.className = 'code';
           codeEl2.textContent = code;
+          // Attach hover to show function tooltip if available
+          const sig = row.dataset.function_signature || row.dataset.funcSig || '';
+          const body = row.dataset.function_body || row.dataset.funcBody || '';
+          if (sig || body) {
+            const tooltip = document.getElementById('fn-tooltip');
+            if (tooltip) {
+              const card = document.createElement('div');
+              card.className = 'card';
+              if (sig) {
+                const s = document.createElement('div');
+                s.className = 'sig';
+                s.textContent = sig;
+                card.appendChild(s);
+              }
+              if (body) {
+                const b = document.createElement('pre');
+                b.className = 'body';
+                b.textContent = body;
+                card.appendChild(b);
+              }
+              tooltip.innerHTML = '';
+              tooltip.appendChild(card);
+              codeEl2.addEventListener('mouseenter', () => { tooltip.style.display = 'block'; });
+              codeEl2.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+              codeEl2.addEventListener('click', () => { tooltip.style.display = (tooltip.style.display === 'none') ? 'block' : 'none'; });
+            }
+          }
           currentLineBanner.appendChild(pathEl);
           currentLineBanner.appendChild(codeEl2);
         }

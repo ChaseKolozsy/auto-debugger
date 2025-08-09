@@ -128,16 +128,56 @@ def create_app(db_path: Optional[str] = None) -> Flask:
         # Build a per-file function map: line -> qualified name
         # This avoids DB migrations and derives method/function context from source.
         import ast
-        function_maps: Dict[str, List[Tuple[int, int, str]]] = {}
+        from typing import TypedDict, Optional as _Optional
 
-        def build_function_ranges(pyfile: str) -> List[Tuple[int, int, str]]:
-            ranges: List[Tuple[int, int, str]] = []
+        class FnInfo(TypedDict, total=False):
+            start: int
+            end: int
+            qual: str
+            sig: str
+            body: str
+
+        function_maps: Dict[str, List[FnInfo]] = {}
+
+        def _extract_sig_and_body(source: str, node: ast.AST) -> Tuple[str, str]:
+            try:
+                segment = ast.get_source_segment(source, node) or ""
+            except Exception:
+                segment = ""
+            lines = segment.splitlines()
+            if not lines:
+                return "", ""
+            # Capture signature lines up to the first line ending with ':' (inclusive)
+            sig_lines: List[str] = []
+            body_lines: List[str] = []
+            found_colon = False
+            for ln in lines:
+                sig_lines.append(ln)
+                if ln.rstrip().endswith(":"):
+                    found_colon = True
+                    break
+            if found_colon:
+                body_lines = lines[len(sig_lines):]
+            else:
+                # Fallback: treat first line as signature, rest as body
+                sig_lines = [lines[0]]
+                body_lines = lines[1:]
+            sig = "\n".join(sig_lines).strip()
+            # Truncate body preview for UI friendliness
+            body = "\n".join(body_lines).strip()
+            max_chars = 1200
+            if len(body) > max_chars:
+                body = body[: max_chars - 1] + "\n…"
+            return sig, body
+
+        def build_function_ranges(pyfile: str) -> List[FnInfo]:
+            infos: List[FnInfo] = []
             try:
                 with open(pyfile, "r", encoding="utf-8") as f:
                     source = f.read()
                 tree = ast.parse(source, filename=pyfile)
             except Exception:
-                return ranges
+                return infos
 
             stack: List[str] = []
 
@@ -152,7 +192,8 @@ def create_app(db_path: Optional[str] = None) -> Flask:
                     start = getattr(node, "lineno", None)
                     end = getattr(node, "end_lineno", None)
                     if isinstance(start, int) and isinstance(end, int):
-                        ranges.append((start, end, qual))
+                        sig, body = _extract_sig_and_body(source, node)
+                        infos.append({"start": start, "end": end, "qual": qual, "sig": sig, "body": body})
                     self.generic_visit(node)
 
                 def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # type: ignore[override]
@@ -160,23 +201,38 @@ def create_app(db_path: Optional[str] = None) -> Flask:
                     start = getattr(node, "lineno", None)
                     end = getattr(node, "end_lineno", None)
                     if isinstance(start, int) and isinstance(end, int):
-                        ranges.append((start, end, qual))
+                        sig, body = _extract_sig_and_body(source, node)
+                        infos.append({"start": start, "end": end, "qual": qual, "sig": sig, "body": body})
                     self.generic_visit(node)
 
             Visitor().visit(tree)
             # Sort by range size descending to prefer the most specific (innermost)
-            ranges.sort(key=lambda t: (t[1] - t[0], t[0]), reverse=True)
-            return ranges
+            infos.sort(key=lambda t: ((t["end"] - t["start"]) if ("end" in t and "start" in t) else 0, t.get("start", 0)), reverse=True)
+            return infos
 
         def function_for_line(pyfile: str, line: int) -> Optional[str]:
             if not pyfile or not os.path.isfile(pyfile):
                 return None
             if pyfile not in function_maps:
                 function_maps[pyfile] = build_function_ranges(pyfile)
-            for start, end, qual in function_maps.get(pyfile, []):
-                if start <= line <= end:
-                    return qual
+            for info in function_maps.get(pyfile, []):
+                start = info.get("start")
+                end = info.get("end")
+                if isinstance(start, int) and isinstance(end, int) and start <= line <= end:
+                    return info.get("qual")
             return None
+
+        def function_detail_for_line(pyfile: str, line: int) -> Tuple[_Optional[str], _Optional[str]]:
+            if not pyfile or not os.path.isfile(pyfile):
+                return None, None
+            if pyfile not in function_maps:
+                function_maps[pyfile] = build_function_ranges(pyfile)
+            for info in function_maps.get(pyfile, []):
+                start = info.get("start")
+                end = info.get("end")
+                if isinstance(start, int) and isinstance(end, int) and start <= line <= end:
+                    return info.get("sig"), info.get("body")
+            return None, None
         for r in rows:
             try:
                 vars_obj = _json.loads(r[5] or '{}')
@@ -187,6 +243,7 @@ def create_app(db_path: Optional[str] = None) -> Flask:
             except Exception:
                 delta_obj = {}
             func_name = function_for_line(r[1], int(r[2]) if r[2] is not None else -1)
+            func_sig, func_body = function_detail_for_line(r[1], int(r[2]) if r[2] is not None else -1)
             reports.append({
                 "id": r[0],
                 "file": r[1],
@@ -201,6 +258,8 @@ def create_app(db_path: Optional[str] = None) -> Flask:
                 "error_type": r[10],
                 "error_message": r[11],
                 "function": func_name,
+                "function_signature": func_sig,
+                "function_body": func_body,
             })
         # Distinct files for quick filtering
         cur.execute("SELECT DISTINCT file FROM line_reports WHERE session_id=? ORDER BY file", (session_id,))
