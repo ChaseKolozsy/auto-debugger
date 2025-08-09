@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import gzip
+import hashlib
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, Optional
 
@@ -115,6 +117,24 @@ class LineReportStore:
               created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
               updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
+            """
+        )
+        # Snapshots of files for sessions (for dirty/no-git runs)
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS file_snapshots (
+              session_id TEXT NOT NULL,
+              file TEXT NOT NULL,
+              sha256 TEXT NOT NULL,
+              content_gzip BLOB NOT NULL,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (session_id, file)
+            );
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_snapshots_session ON file_snapshots(session_id);
             """
         )
         self.conn.commit()
@@ -234,6 +254,37 @@ class LineReportStore:
         )
         self.conn.commit()
         return int(last_id)
+
+    def add_file_snapshot(self, session_id: str, file: str, content: bytes) -> None:
+        assert self.conn is not None
+        sha = hashlib.sha256(content).hexdigest()
+        gz = gzip.compress(content)
+        cur = self.conn.cursor()
+        # Do not overwrite if already present
+        cur.execute(
+            """
+            INSERT OR IGNORE INTO file_snapshots(session_id, file, sha256, content_gzip)
+            VALUES (?,?,?,?)
+            """,
+            (session_id, file, sha, sqlite3.Binary(gz)),
+        )
+        self.conn.commit()
+
+    def get_file_snapshot(self, session_id: str, file: str) -> Optional[str]:
+        assert self.conn is not None
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT content_gzip FROM file_snapshots WHERE session_id=? AND file=?",
+            (session_id, file),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        try:
+            data = gzip.decompress(row[0])
+            return data.decode("utf-8", errors="replace")
+        except Exception:
+            return None
 
     def export_session_json(self, session_id: str) -> str:
         assert self.conn is not None

@@ -236,11 +236,20 @@ def create_app(db_path: Optional[str] = None) -> Flask:
                     source = None
             # Fallback to disk
             if source is None:
+                # Try snapshot from DB when available
                 try:
-                    with open(pyfile, "r", encoding="utf-8") as f:
-                        source = f.read()
+                    store: LineReportStore = app._req_store  # type: ignore[attr-defined]
+                    snap = store.get_file_snapshot(session_id, pyfile)
+                    if snap:
+                        source = snap
                 except Exception:
                     source = None
+                if source is None:
+                    try:
+                        with open(pyfile, "r", encoding="utf-8") as f:
+                            source = f.read()
+                    except Exception:
+                        source = None
             if not source:
                 return None, None
             try:

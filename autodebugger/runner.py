@@ -242,6 +242,16 @@ class AutoDebugger:
                         except Exception:
                             code = ""
 
+                        # For dirty/no-git sessions: snapshot original file content once
+                        try:
+                            if not git_commit or git_dirty:
+                                with open(file_path, "rb") as sf:
+                                    content_bytes = sf.read()
+                                # Store snapshot best-effort; ignore duplicates
+                                self.db.add_file_snapshot(self.session_id, file_path, content_bytes)
+                        except Exception:
+                            pass
+
                         # Scopes -> variables
                         scopes = client.request("scopes", {"frameId": frame.get("id")})
                         vars_payload: Dict[str, Any] = {}
