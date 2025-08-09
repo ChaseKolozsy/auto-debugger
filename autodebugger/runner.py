@@ -664,6 +664,9 @@ class AutoDebugger:
                                 self._controller.update_state(waiting=False)
                             
                             # Process action
+                            # Clear the just_activated_manual flag since we've now received user input
+                            just_activated_manual = False
+                            
                             if action == 'quit':
                                 try:
                                     client.request("disconnect", {"terminateDebuggee": True}, wait=2.0)
@@ -682,6 +685,8 @@ class AutoDebugger:
                                 client.request("continue", {"threadId": thread_id})
                                 should_step_after = False  # Don't step, we already continued
                                 continue
+                            elif action == 'step':
+                                should_step_after = True  # Explicitly handle step action
                             # Default: step (should_step_after remains True)
                         else:
                             # Not in manual mode - continue stepping automatically
