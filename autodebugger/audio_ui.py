@@ -29,7 +29,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
-from .db import DEFAULT_DB_PATH, LineReportStore
+from .db import DEFAULT_DB_PATH
 
 
 class MacSayTTS:
@@ -88,15 +88,6 @@ class MacSayTTS:
                     except Exception:
                         pass
             self._proc = None
-
-
-class VoiceRecognizer:  # Legacy placeholder; voice input disabled per design
-    def __init__(self, commands: Iterable[str], listens_in_foreground_only: bool = False) -> None:
-        self.available = False
-    def get_command_nowait(self) -> Optional[str]:
-        return None
-    def stop(self) -> None:
-        pass
 
 
 @dataclass
@@ -174,67 +165,11 @@ def _update_observations(conn: sqlite3.Connection, line_id: Any, note: str) -> N
         pass
 
 
-NUM_WORDS = {
-    "zero": 0,
-    "one": 1,
-    "two": 2,
-    "three": 3,
-    "four": 4,
-    "five": 5,
-    "six": 6,
-    "seven": 7,
-    "eight": 8,
-    "nine": 9,
-}
-
-
-class InputManager:
-    def __init__(self) -> None:
-        self._queue: "queue.Queue[str]" = queue.Queue()
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._reader_loop, daemon=True)
-        self._thread.start()
-
-    def _reader_loop(self) -> None:
-        while not self._stop.is_set():
-            try:
-                line = sys.stdin.readline()
-                if not line:
-                    time.sleep(0.05)
-                    continue
-                self._queue.put(line.strip())
-            except Exception:
-                time.sleep(0.05)
-
-    def get_line_nowait(self) -> Optional[str]:
-        try:
-            return self._queue.get_nowait()
-        except queue.Empty:
-            return None
-
-    def wait_for_line(self, predicate: Optional[Iterable[str]] = None) -> str:
-        while True:
-            try:
-                line = self._queue.get(timeout=0.05)
-                if not predicate:
-                    return line
-                # If predicate is an iterable of allowed strings
-                if isinstance(predicate, (list, tuple, set)):
-                    if line in predicate:
-                        return line
-                else:
-                    return line
-            except queue.Empty:
-                if self._stop.is_set():
-                    return ""
-
-    def stop(self) -> None:
-        self._stop.set()
-        if self._thread.is_alive():
-            try:
-                self._thread.join(timeout=1.0)
-            except Exception:
-                pass
+def _prompt(prompt: str) -> str:
+    try:
+        return input(prompt)
+    except EOFError:
+        return ""
 
 
 def summarize_delta(delta: Dict[str, Any], max_len: int = 120) -> str:
@@ -276,7 +211,7 @@ def speak_session_page(tts: MacSayTTS, sessions: List[SessionItem], page_idx: in
         time.sleep(0.2)
 
 
-def paginate_sessions(conn: sqlite3.Connection, tts: MacSayTTS, input_mgr: InputManager) -> Optional[SessionItem]:
+def paginate_sessions(conn: sqlite3.Connection, tts: MacSayTTS) -> Optional[SessionItem]:
     total = count_sessions(conn)
     if total == 0:
         tts.speak("There are no sessions in the database")
@@ -295,51 +230,31 @@ def paginate_sessions(conn: sqlite3.Connection, tts: MacSayTTS, input_mgr: Input
             return None
         speak_session_page(tts, sessions, page)
 
+        # Prompt user to select
         while True:
-            # Poll typed lines without blocking TTS
-            cmd = input_mgr.get_line_nowait()
-            if cmd is None:
-                if page == 0:
-                    tts.speak("Selecting item zero by default")
-                    return sessions[0]
-                tts.speak("Moving to next page")
-                page += 1
-                break
-
-            if cmd in NUM_WORDS:
-                idx = NUM_WORDS[cmd]
-                if idx < len(sessions):
-                    tts.speak(f"Selected {idx} {sessions[idx].script_name}")
-                    return sessions[idx]
-                else:
-                    tts.speak("That index is not on this page")
-                    continue
-            if cmd.isdigit() and len(cmd) == 1:
-                idx = int(cmd)
-                if idx < len(sessions):
-                    tts.speak(f"Selected {idx} {sessions[idx].script_name}")
-                    return sessions[idx]
-                else:
-                    tts.speak("That index is not on this page")
-                    continue
-            if cmd in ("ok", "okay"):
-                tts.speak(f"Okay. Selecting {sessions[0].script_name}")
+            resp = _prompt("Select 0-9, 'okay' for 0, 'next' for next page, 'q' to quit (default 0): ").strip().lower()
+            if resp == "":
                 return sessions[0]
-            if cmd == "next" or cmd == "n":
-                tts.speak("Next page")
-                page += 1
-                break
-            if cmd in ("quit", "exit", "q"):
+            if resp in ("ok", "okay"):
+                return sessions[0]
+            if resp in ("q", "quit", "exit"):
                 tts.speak("Goodbye")
                 return None
-            tts.speak("Type a number, 'okay', or 'next'")
+            if resp in ("next", "n"):
+                page += 1
+                break
+            if resp.isdigit() and len(resp) == 1:
+                idx = int(resp)
+                if idx < len(sessions):
+                    tts.speak(f"Selected {idx} {sessions[idx].script_name}")
+                    return sessions[idx]
+            tts.speak("Invalid selection")
 
 
 def autoplay_session(
     conn: sqlite3.Connection,
     tts: MacSayTTS,
     session: SessionItem,
-    input_mgr: InputManager,
     delay_s: float = 0.4,
 ) -> None:
     tts.speak(f"Playing session {session.script_name}")
@@ -358,18 +273,9 @@ def autoplay_session(
             text = prefix + "no code captured"
         tts.speak(text, interrupt=True)
 
-        # While speaking, user can type notes freely; do not advance on 'next' until speech is done
+        # Wait for speech to finish
         while tts.is_speaking():
-            note = input_mgr.get_line_nowait()
-            if note in ("quit", "q", "exit"):
-                tts.stop()
-                tts.speak("Stopping playback", interrupt=True)
-                return
-            if note not in (None, ""):
-                try:
-                    _update_observations(conn, line_id, note)
-                except Exception:
-                    pass
+            time.sleep(0.05)
 
         summary = summarize_delta(delta)
         if summary and summary != "no changes":
@@ -377,16 +283,7 @@ def autoplay_session(
         else:
             tts.speak("No changes")
         while tts.is_speaking():
-            note = input_mgr.get_line_nowait()
-            if note in ("quit", "q", "exit"):
-                tts.stop()
-                tts.speak("Stopping playback", interrupt=True)
-                return
-            if note not in (None, ""):
-                try:
-                    _update_observations(conn, line_id, note)
-                except Exception:
-                    pass
+            time.sleep(0.05)
 
         if status == "error":
             if err:
@@ -394,28 +291,21 @@ def autoplay_session(
             else:
                 tts.speak("An error occurred")
             while tts.is_speaking():
-                note = input_mgr.get_line_nowait()
-                if note in ("quit", "q", "exit"):
-                    tts.stop()
-                    tts.speak("Stopping playback", interrupt=True)
-                    return
-                if note not in (None, ""):
-                    try:
-                        _update_observations(conn, line_id, note)
-                    except Exception:
-                        pass
+                time.sleep(0.05)
 
-        # Now wait until user submits 'next' (Enter), capturing any note lines meanwhile
+        # Now block until user submits 'next', saving any other entered text as notes
         while True:
-            cmd_or_note = input_mgr.wait_for_line()
-            if cmd_or_note in ("next", "n"):
+            cmd_or_note = _prompt("Note or 'next' (q to quit): ").strip()
+            low = cmd_or_note.lower()
+            if low in ("next", "n"):
                 break
-            if cmd_or_note in ("quit", "q", "exit"):
+            if low in ("quit", "q", "exit"):
                 tts.speak("Stopping playback", interrupt=True)
                 return
             if cmd_or_note:
                 try:
                     _update_observations(conn, line_id, cmd_or_note)
+                    tts.speak("Noted")
                 except Exception:
                     pass
 
@@ -424,19 +314,16 @@ def autoplay_session(
 
 def run_audio_interface(
     db_path: Optional[str] = None,
-    voice: str = "Samantha",
+    voice: Optional[str] = None,
     rate_wpm: int = 210,
-    enable_voice: bool = True,
     delay_s: float = 0.4,
     verbose: bool = False,
 ) -> int:
     tts = MacSayTTS(voice=voice, rate_wpm=rate_wpm, verbose=verbose)
-    input_mgr = InputManager()
 
     def _sigint(_sig, _frm):
         try:
             tts.stop()
-            input_mgr.stop()
         finally:
             sys.exit(0)
 
@@ -450,13 +337,12 @@ def run_audio_interface(
     with open_db(path) as conn:
         if verbose:
             print(f"[audio] Opening DB: {path}")
-        session = paginate_sessions(conn, tts, input_mgr)
+        session = paginate_sessions(conn, tts)
         if not session:
             return 0
         if verbose:
             print(f"[audio] Selected session: {session.session_id} {session.file}")
-        autoplay_session(conn, tts, session, input_mgr, delay_s=delay_s)
+        autoplay_session(conn, tts, session, delay_s=delay_s)
 
-    input_mgr.stop()
     tts.stop()
     return 0
