@@ -4,14 +4,25 @@
   <meta charset="utf-8" />
   <title>AutoDebugger - Sessions</title>
   <style>
-    body { font-family: system-ui, sans-serif; margin: 24px; }
+    body { font-family: system-ui, sans-serif; margin: 24px; background: #ffffff; color:#111827; }
     header { display:flex; gap:16px; align-items:center; }
     table { border-collapse: collapse; width: 100%; margin-top: 12px; }
     th, td { border: 1px solid #ddd; padding: 8px; font-size: 14px; }
     th { background: #f7f7f7; text-align: left; }
     .pill { padding: 2px 8px; border-radius: 999px; background: #eee; }
     .count { font-weight: 600; }
+
+    /* Dark mode */
+    .dark body { background:#0b1020; color:#e5e7eb; }
+    .dark th, .dark td { border-color: #263041; }
+    .dark th { background: #0f172a; color:#e2e8f0; }
   </style>
+  <script>
+    (function(){
+      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (prefersDark) document.documentElement.classList.add('dark');
+    })();
+  </script>
 </head>
 <body>
   <header>
