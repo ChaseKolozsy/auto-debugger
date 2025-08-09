@@ -553,8 +553,45 @@ class AutoDebugger:
                             )
                             
                             if should_speak:
-                                # Announce line
-                                announcement = f"Line {line}: {code}"
+                                # Track if we're entering a new function
+                                if not hasattr(self, '_last_announced_function'):
+                                    self._last_announced_function = None
+                                
+                                current_function = None
+                                should_announce_function = False
+                                
+                                if self._controller and hasattr(self._controller.shared_state, 'get_state'):
+                                    state = self._controller.shared_state.get_state()
+                                    current_function = state.get('function_name')
+                                    panel_open = state.get('function_panel_open', False)
+                                    
+                                    # Check if this is a new function and panel is open
+                                    if current_function != self._last_announced_function:
+                                        if current_function and panel_open:
+                                            should_announce_function = True
+                                        self._last_announced_function = current_function
+                                
+                                # Build the announcement
+                                if should_announce_function:
+                                    # Include function context in the announcement
+                                    state = self._controller.shared_state.get_state()
+                                    func_sig = state.get('function_sig', '')
+                                    func_body = state.get('function_body', '')
+                                    
+                                    announcement = f"Entering function {current_function}. "
+                                    if func_sig:
+                                        announcement += f"Signature: {func_sig}. "
+                                    if func_body:
+                                        # Limit body length
+                                        if len(func_body) > 150:
+                                            func_body = func_body[:150] + "..."
+                                        announcement += f"Body: {func_body}. "
+                                    announcement += f"Line {line}: {code}"
+                                else:
+                                    # Just announce the line
+                                    announcement = f"Line {line}: {code}"
+                                
+                                # Speak with interrupt to clear any previous speech
                                 self._tts.speak(announcement, interrupt=True)
                                 
                                 # Summarize scope

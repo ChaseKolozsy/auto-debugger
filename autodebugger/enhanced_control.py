@@ -133,7 +133,8 @@ class SharedState:
             "function_sig": None,
             "function_body": None,
             "audio_enabled": False,  # Will be set based on --manual-audio flag
-            "audio_available": False  # Will be set if TTS is available
+            "audio_available": False,  # Will be set if TTS is available
+            "function_panel_open": False  # Track if function panel is visible
         }
         self._function_cache = {}  # Cache function contexts by (file, line)
         self._extraction_thread = None
@@ -615,17 +616,9 @@ class StepControlHandler(BaseHTTPRequestHandler):
             document.getElementById('line').textContent = state.line || '-';
             document.getElementById('function').textContent = state.function_name || '-';
             
-            // Check if we entered a new function
+            // Track function changes but don't trigger audio from here
+            // Audio is handled entirely by runner.py to avoid conflicts
             if (state.function_name !== lastAnnouncedFunction) {
-                if (state.function_name) {
-                    // We're in a new function
-                    if (functionPanelOpen && state.audio_enabled) {
-                        // Delay the function announcement to let the line finish speaking
-                        setTimeout(() => {
-                            readFunctionContext();
-                        }, 2000); // 2 second delay for line to finish
-                    }
-                }
                 lastAnnouncedFunction = state.function_name;
             }
             
@@ -686,19 +679,16 @@ class StepControlHandler(BaseHTTPRequestHandler):
             functionPanelOpen = ctx.classList.contains('visible');
             console.log('Toggle complete, visible:', functionPanelOpen);
             
-            // Don't read when toggling - only read when entering new functions
-            // with the panel open (handled in updateUI)
-        }
-        
-        function readFunctionContext() {
-            // Fire and forget - don't await
-            fetch('/read-function', {
+            // Notify server about panel state change
+            fetch('/panel-state', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'}
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({panel_open: functionPanelOpen})
             }).catch(e => {
-                console.error('Failed to read function context:', e);
+                console.error('Failed to update panel state:', e);
             });
         }
+        
         
         async function toggleAudio() {
             try {
@@ -768,52 +758,12 @@ class StepControlHandler(BaseHTTPRequestHandler):
         elif self.path == "/toggle-audio":
             new_state = self.shared.toggle_audio()
             self._send(200, {"status": "ok", "audio_enabled": new_state})
-        elif self.path == "/read-function":
-            # Read function context aloud
-            state = self.shared.get_state()
-            if state.get('function_name') and state.get('audio_enabled'):
-                # Build the full function text to read
-                func_text = f"In function {state['function_name']}"
-                
-                # Add the signature
-                if state.get('function_sig'):
-                    func_text += f". Signature: {state['function_sig']}"
-                
-                # Add the function body (limit to prevent very long reads)
-                if state.get('function_body'):
-                    body = state['function_body']
-                    # Limit body to first 200 chars to avoid blocking too long
-                    if len(body) > 200:
-                        body = body[:200] + "..."
-                    func_text += f". Body: {body}"
-                
-                # Use subprocess directly to avoid TTS lock conflicts
-                # This bypasses the shared TTS instance completely
-                import subprocess
-                import threading
-                
-                def speak_directly():
-                    try:
-                        # Get voice settings from TTS if available
-                        tts = getattr(self.server, 'tts', None)
-                        voice = getattr(tts, 'voice', None) if tts else None
-                        rate_wpm = getattr(tts, 'rate_wpm', 210) if tts else 210
-                        
-                        args = ["say"]
-                        if voice:
-                            args += ["-v", voice]
-                        args += ["-r", str(rate_wpm), func_text]
-                        
-                        # Run say command directly without going through TTS instance
-                        subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    except Exception:
-                        pass  # Silently fail if TTS unavailable
-                
-                # Speak in a separate thread without using the shared TTS instance
-                threading.Thread(target=speak_directly, daemon=True).start()
-                self._send(200, {"status": "ok", "spoken": func_text[:100] + "..."})
-            else:
-                self._send(200, {"status": "ok", "message": "No function context or audio disabled"})
+        elif self.path == "/panel-state":
+            length = int(self.headers.get('Content-Length', 0))
+            data = json.loads(self.rfile.read(length))
+            panel_open = data.get('panel_open', False)
+            self.shared.update_state(function_panel_open=panel_open)
+            self._send(200, {"status": "ok", "panel_open": panel_open})
         else:
             self.send_error(404)
     
