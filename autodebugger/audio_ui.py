@@ -40,12 +40,22 @@ class MacSayTTS:
         self._lock = threading.Lock()
         self.verbose = verbose
 
-    def speak(self, text: str, interrupt: bool = True) -> None:
+    def is_speaking(self) -> bool:
+        with self._lock:
+            return bool(self._proc and self._proc.poll() is None)
+
+    def speak(self, text: str, interrupt: bool = False) -> None:
         if not text:
             return
         with self._lock:
-            if interrupt:
+            if interrupt and self._proc and self._proc.poll() is None:
                 self.stop()
+            # If a previous utterance is still playing and we are not interrupting, wait for it
+            if not interrupt and self._proc and self._proc.poll() is None:
+                try:
+                    self._proc.wait(timeout=10.0)
+                except Exception:
+                    pass
             try:
                 self._proc = subprocess.Popen(
                     ["say", "-v", self.voice, "-r", str(self.rate_wpm), text],
@@ -382,7 +392,19 @@ def autoplay_session(
             text = prefix + code.strip()
         else:
             text = prefix + "no code captured"
-        tts.speak(text)
+        tts.speak(text, interrupt=True)
+
+        # While speaking, allow 'next'/'n' to skip or 'q' to quit
+        while tts.is_speaking():
+            cmd = input_mgr.read_command(timeout=0.05)
+            if not cmd:
+                continue
+            if cmd in ("next", "n"):
+                tts.stop()
+                break
+            if cmd in ("quit", "q", "exit"):
+                tts.speak("Stopping playback", interrupt=True)
+                return
 
         summary = summarize_delta(delta)
         if summary and summary != "no changes":
@@ -404,7 +426,7 @@ def autoplay_session(
             if cmd in ("next", "n"):
                 break
             if cmd in ("quit", "q", "exit"):
-                tts.speak("Stopping playback")
+                tts.speak("Stopping playback", interrupt=True)
                 return
 
     tts.speak("End of session")
