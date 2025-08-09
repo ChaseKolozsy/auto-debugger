@@ -8,6 +8,7 @@ from typing import Optional
 import click
 
 from .runner import AutoDebugger
+from .audio_ui import run_audio_interface
 from .db import LineReportStore
 from .ui import create_app
 
@@ -53,3 +54,22 @@ def ui_cmd(db_path: Optional[str], host: str, port: int, open_browser: bool) -> 
         import webbrowser
         webbrowser.open(f"http://{host}:{port}/")
     app.run(host=host, port=port)
+
+
+@main.command("audio")
+@click.option("--db", "db_path", type=click.Path(), default=None, help="SQLite DB path for reports.")
+@click.option("--voice", default="Samantha", show_default=True, help="macOS voice name for 'say'")
+@click.option("--rate", default=210, show_default=True, type=int, help="Speech rate (words per minute)")
+@click.option("--no-voice", "no_voice", is_flag=True, default=False, help="Disable voice recognition (keyboard only)")
+@click.option("--delay", default=0.4, show_default=True, type=float, help="Delay between lines during autoplay (seconds)")
+def audio_cmd(db_path: Optional[str], voice: str, rate: int, no_voice: bool, delay: float) -> None:
+    """macOS audio interface for reviewing sessions (TTS + optional voice commands)."""
+    code = run_audio_interface(
+        db_path=db_path,
+        voice=voice,
+        rate_wpm=rate,
+        enable_voice=(not no_voice),
+        delay_s=delay,
+    )
+    # propagate exit code
+    sys.exit(code)

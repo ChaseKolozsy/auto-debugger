@@ -9,6 +9,12 @@ Usage
 - Run: `autodebug run path/to/script.py [-- args...]`
 - Export JSON: `autodebug export --db .autodebug/line_reports.db --session <id>`
 
+Audio review (macOS)
+- Review sessions by voice: `autodebug audio --db .autodebug/line_reports.db`
+- Options: `--voice Samantha`, `--rate 210`, `--no-voice` (keyboard only), `--delay 0.4`
+- Voice commands while selecting sessions (paged 0–9): say “okay” (select 0), a number 0–9 (“zero..nine”), or “next”. Keyboard fallback: Enter=0, digits 0–9, `n` next, `q` quit.
+- During playback: reads each executed line and summarizes variable changes; say “next” or press `n` to skip; `q` to quit.
+
 Selecting the Python interpreter / environments
 - The debugger can target any Python interpreter via `--python`, otherwise it uses the interpreter running the CLI (`sys.executable`). The specified interpreter must have `debugpy` installed.
 
