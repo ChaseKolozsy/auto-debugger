@@ -1,0 +1,41 @@
+from __future__ import annotations
+
+import os
+import sys
+import uuid
+from typing import Optional
+
+import click
+
+from .runner import AutoDebugger
+from .db import LineReportStore
+
+
+@click.group()
+def main() -> None:  # pragma: no cover
+    pass
+
+
+@main.command("run")
+@click.option("--python", "python_exe", type=click.Path(), default=None, help="Path to Python executable to run debugpy.")
+@click.option("--db", "db_path", type=click.Path(), default=None, help="SQLite DB path for reports.")
+@click.option("--stop/--no-stop", "stop_on_entry", default=True, help="Stop on entry.")
+@click.option("--just-my-code/--all-code", "just_my_code", default=True, help="Restrict to user code.")
+@click.argument("script", type=click.Path(exists=True))
+@click.argument("script_args", nargs=-1)
+def run_cmd(python_exe: Optional[str], db_path: Optional[str], stop_on_entry: bool, just_my_code: bool, script: str, script_args: tuple[str, ...]) -> None:
+    dbg = AutoDebugger(python_exe=python_exe, db_path=db_path)
+    session_id = dbg.run(script, list(script_args), just_my_code=just_my_code, stop_on_entry=stop_on_entry)
+    click.echo(session_id)
+
+
+@main.command("export")
+@click.option("--db", "db_path", type=click.Path(), default=None, help="SQLite DB path for reports.")
+@click.option("--session", "session_id", type=str, required=True)
+def export_cmd(db_path: Optional[str], session_id: str) -> None:
+    store = LineReportStore(db_path)
+    store.open()
+    try:
+        click.echo(store.export_session_json(session_id))
+    finally:
+        store.close()

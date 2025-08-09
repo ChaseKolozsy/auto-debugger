@@ -1,2 +1,29 @@
-**__pycache__**
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+.build/
+build/
+dist/
+.coverage
+htmlcov/
+.pytest_cache/
+.venv/
+venv/
+.env
 
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Local data
+.autodebug/
+.autodebug/*
+.autodebug/**
+
+# Logs
+*.log

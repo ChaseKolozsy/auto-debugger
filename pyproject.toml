@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autodebugger"
+version = "0.1.0"
+description = "Python auto-debugger: step every executed line and record scope/variables to SQLite using debugpy"
+authors = [{ name = "aXaTT" }]
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "debugpy>=1.8.0",
+  "click>=8.1.7",
+  "pydantic>=2.6.0",
+]
+
+[project.scripts]
+autodebug = "autodebugger.cli:main"
+
+[tool.setuptools]
+packages = ["autodebugger"]
