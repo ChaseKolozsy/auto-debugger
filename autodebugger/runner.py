@@ -647,7 +647,6 @@ class AutoDebugger:
                                         self._tts.speak(f"Changes: {delta_summary}")
                             
                             # Wait for user action
-                            print(f"[DEBUG Runner] Waiting for action at line {line}", flush=True)
                             action = None
                             if self._controller:
                                 # Web interface
@@ -656,7 +655,6 @@ class AutoDebugger:
                                     if self._abort_requested:
                                         action = 'quit'
                                         break
-                                print(f"[DEBUG Runner] Got action: {action}", flush=True)
                             else:
                                 # Terminal interface
                                 action = prompt_for_action()
