@@ -197,18 +197,13 @@ def summarize_delta(delta: Dict[str, Any], max_len: int = 120) -> str:
     return text
 
 
-def speak_session_page(tts: MacSayTTS, sessions: List[SessionItem], page_idx: int) -> None:
-    if not sessions:
-        tts.speak("No sessions found.")
-        return
-    tts.speak(f"Page {page_idx + 1}. Sessions.")
-    for i, s in enumerate(sessions):
-        idx_name = f"{i}"
-        script = s.script_name
-        tts.speak(f"{idx_name}. {script}")
-        time.sleep(0.25)
-        tts.speak(f"Path: {s.file}")
-        time.sleep(0.2)
+def speak_single_session_item(tts: MacSayTTS, idx: int, item: SessionItem) -> None:
+    tts.speak(f"{idx}. {item.script_name}", interrupt=True)
+    while tts.is_speaking():
+        time.sleep(0.05)
+    tts.speak(f"Path: {item.file}")
+    while tts.is_speaking():
+        time.sleep(0.05)
 
 
 def paginate_sessions(conn: sqlite3.Connection, tts: MacSayTTS) -> Optional[SessionItem]:
@@ -228,27 +223,35 @@ def paginate_sessions(conn: sqlite3.Connection, tts: MacSayTTS) -> Optional[Sess
         if not sessions:
             tts.speak("No more sessions.")
             return None
-        speak_session_page(tts, sessions, page)
+        tts.speak(f"Page {page + 1}.")
+        while tts.is_speaking():
+            time.sleep(0.05)
 
-        # Prompt user to select
-        while True:
-            resp = _prompt("Select 0-9, 'okay' for 0, 'next' for next page, 'q' to quit (default 0): ").strip().lower()
+        idx = 0
+        while idx < len(sessions):
+            speak_single_session_item(tts, idx, sessions[idx])
+            resp = _prompt("Enter=choose current, number 0-9, 'next' for next item, 'page' next page, 'q' quit: ").strip().lower()
             if resp == "":
-                return sessions[0]
+                return sessions[idx]
             if resp in ("ok", "okay"):
-                return sessions[0]
+                return sessions[idx]
             if resp in ("q", "quit", "exit"):
                 tts.speak("Goodbye")
                 return None
-            if resp in ("next", "n"):
+            if resp in ("page", "p"):
                 page += 1
                 break
+            if resp in ("next", "n"):
+                idx += 1
+                continue
             if resp.isdigit() and len(resp) == 1:
-                idx = int(resp)
-                if idx < len(sessions):
-                    tts.speak(f"Selected {idx} {sessions[idx].script_name}")
-                    return sessions[idx]
+                num = int(resp)
+                if 0 <= num < len(sessions):
+                    return sessions[num]
             tts.speak("Invalid selection")
+        else:
+            # finished items on this page without selection -> go to next page
+            page += 1
 
 
 def autoplay_session(
