@@ -15,9 +15,14 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import debugpy
 
-try:
-    from .enhanced_control import HttpStepController, prompt_for_action
-except ImportError:
+# Temporarily use basic control to test if enhanced is causing issues
+USE_ENHANCED = False
+if USE_ENHANCED:
+    try:
+        from .enhanced_control import HttpStepController, prompt_for_action
+    except ImportError:
+        from .control import HttpStepController, prompt_for_action
+else:
     from .control import HttpStepController, prompt_for_action
 from .dap_client import DapClient
 from .db import LineReport, LineReportStore, SessionSummary
