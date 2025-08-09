@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from flask import Flask, render_template, request, redirect, url_for
 
 from .db import LineReportStore
@@ -124,6 +124,59 @@ def create_app(db_path: Optional[str] = None) -> Flask:
         rows = cur.fetchall()
         import json as _json
         reports = []
+
+        # Build a per-file function map: line -> qualified name
+        # This avoids DB migrations and derives method/function context from source.
+        import ast
+        function_maps: Dict[str, List[Tuple[int, int, str]]] = {}
+
+        def build_function_ranges(pyfile: str) -> List[Tuple[int, int, str]]:
+            ranges: List[Tuple[int, int, str]] = []
+            try:
+                with open(pyfile, "r", encoding="utf-8") as f:
+                    source = f.read()
+                tree = ast.parse(source, filename=pyfile)
+            except Exception:
+                return ranges
+
+            stack: List[str] = []
+
+            class Visitor(ast.NodeVisitor):
+                def visit_ClassDef(self, node: ast.ClassDef) -> None:  # type: ignore[override]
+                    stack.append(node.name)
+                    self.generic_visit(node)
+                    stack.pop()
+
+                def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # type: ignore[override]
+                    qual = ".".join(stack + [node.name]) if stack else node.name
+                    start = getattr(node, "lineno", None)
+                    end = getattr(node, "end_lineno", None)
+                    if isinstance(start, int) and isinstance(end, int):
+                        ranges.append((start, end, qual))
+                    self.generic_visit(node)
+
+                def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # type: ignore[override]
+                    qual = ".".join(stack + [node.name]) if stack else node.name
+                    start = getattr(node, "lineno", None)
+                    end = getattr(node, "end_lineno", None)
+                    if isinstance(start, int) and isinstance(end, int):
+                        ranges.append((start, end, qual))
+                    self.generic_visit(node)
+
+            Visitor().visit(tree)
+            # Sort by range size descending to prefer the most specific (innermost)
+            ranges.sort(key=lambda t: (t[1] - t[0], t[0]), reverse=True)
+            return ranges
+
+        def function_for_line(pyfile: str, line: int) -> Optional[str]:
+            if not pyfile or not os.path.isfile(pyfile):
+                return None
+            if pyfile not in function_maps:
+                function_maps[pyfile] = build_function_ranges(pyfile)
+            for start, end, qual in function_maps.get(pyfile, []):
+                if start <= line <= end:
+                    return qual
+            return None
         for r in rows:
             try:
                 vars_obj = _json.loads(r[5] or '{}')
@@ -133,6 +186,7 @@ def create_app(db_path: Optional[str] = None) -> Flask:
                 delta_obj = _json.loads(r[6] or '{}')
             except Exception:
                 delta_obj = {}
+            func_name = function_for_line(r[1], int(r[2]) if r[2] is not None else -1)
             reports.append({
                 "id": r[0],
                 "file": r[1],
@@ -146,6 +200,7 @@ def create_app(db_path: Optional[str] = None) -> Flask:
                 "status": r[9],
                 "error_type": r[10],
                 "error_message": r[11],
+                "function": func_name,
             })
         # Distinct files for quick filtering
         cur.execute("SELECT DISTINCT file FROM line_reports WHERE session_id=? ORDER BY file", (session_id,))

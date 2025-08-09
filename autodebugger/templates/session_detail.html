@@ -161,6 +161,7 @@
         data-status='{{ r.status }}'
         data-variables='{{ r.variables | tojson }}'
         data-delta='{{ r.variables_delta | tojson }}'
+        {% if r.function %}data-func='{{ r.function }}'{% endif %}
       >
         <td>{{r.id}}</td>
         <td style="max-width: 360px; word-break: break-all;">{{r.file}}</td>
@@ -466,7 +467,8 @@
           currentLineBanner.innerHTML = '';
           const pathEl = document.createElement('div');
           pathEl.className = 'path';
-          pathEl.textContent = `${file}:${line}`;
+          const func = row.dataset.func;
+          pathEl.textContent = func ? `${file}:${line} — ${func}()` : `${file}:${line}`;
           pathEl.title = `${file}:${line}`;
           const codeEl2 = document.createElement('div');
           codeEl2.className = 'code';
