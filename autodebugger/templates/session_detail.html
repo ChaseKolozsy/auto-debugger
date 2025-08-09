@@ -55,6 +55,8 @@
     .stepper .status { font-size: 12px; color:#6b7280; }
 
     /* Table interactivity */
+    .table-container { max-height: 50vh; overflow: auto; margin-top: 12px; border: 1px solid #eee; border-radius: 8px; }
+    .table-container table { border: none; margin: 0; width: 100%; }
     tbody tr { cursor: pointer; }
     tbody tr:hover { background: #fbfbfb; }
     tbody tr.selected { outline: 2px solid #60a5fa; outline-offset: -2px; background:#f0f9ff; }
@@ -123,6 +125,7 @@
     </div>
   </div>
 
+  <div class="table-container">
   <table>
     <thead>
       <tr>
@@ -174,6 +177,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 
   <script>
     (function() {
@@ -479,6 +483,7 @@
 
       // Hook up table row clicks
       const tbody = document.querySelector('tbody');
+      const tableContainer = document.querySelector('.table-container');
       if (!tbody) return;
       let selected = null;
       let rows = Array.from(tbody.querySelectorAll('tr'));
@@ -492,7 +497,19 @@
         if (selected) selected.classList.remove('selected');
         selected = tr;
         tr.classList.add('selected');
-        tr.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Keep selection visible within the table container without moving the whole page
+        if (tableContainer) {
+          const rowTop = tr.offsetTop;
+          const rowBottom = rowTop + tr.offsetHeight;
+          const viewTop = tableContainer.scrollTop;
+          const viewBottom = viewTop + tableContainer.clientHeight;
+          const padding = 24;
+          if (rowTop < viewTop) {
+            tableContainer.scrollTo({ top: Math.max(0, rowTop - padding), behavior: 'smooth' });
+          } else if (rowBottom > viewBottom) {
+            tableContainer.scrollTo({ top: rowBottom - tableContainer.clientHeight + padding, behavior: 'smooth' });
+          }
+        }
         renderVisualizer(tr);
         updateStepperStatus();
       }
