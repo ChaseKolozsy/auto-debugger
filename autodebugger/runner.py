@@ -283,7 +283,10 @@ class AutoDebugger:
         if manual_audio:
             self._tts = MacSayTTS(voice=manual_voice, rate_wpm=manual_rate_wpm, verbose=False)
             # Initialize nested explorer for interactive variable exploration
-            self._nested_explorer = NestedValueExplorer(self._tts, verbose=False)
+            # Pass data fetcher to allow fetching complete data when ellipsis is encountered
+            def _data_fetcher(ref: int) -> Any:
+                return self._fetch_complete_value(ref) if self.client else None
+            self._nested_explorer = NestedValueExplorer(self._tts, verbose=False, data_fetcher=_data_fetcher)
             
             # Give initial instructions if starting in manual mode
             if manual_mode_active:
@@ -1129,9 +1132,8 @@ class AutoDebugger:
                                                             time.sleep(0.05)
                                                     # Explore via nested explorer if available
                                                     if self._nested_explorer:
-                                                        # If value has _parsed, it will be handled by the explorer
-                                                        # Otherwise use the value as-is
-                                                        self._nested_explorer.explore_value(var_name, value)
+                                                        # Use interactive exploration with i/o/n navigation
+                                                        self._nested_explorer.explore_interactive(var_name, value)
                                                     # Ask whether to explore another
                                                     if self._tts:
                                                         self._tts.speak("Explore another variable? Y for yes, N to stop")
@@ -1285,7 +1287,8 @@ class AutoDebugger:
                                                     while self._tts.is_speaking():
                                                         time.sleep(0.05)
                                                 if self._nested_explorer:
-                                                    self._nested_explorer.explore_value(var_name, value)
+                                                    # Use interactive exploration with i/o/n navigation
+                                                    self._nested_explorer.explore_interactive(var_name, value)
                                                 if self._tts:
                                                     self._tts.speak("Explore another variable? Y for yes, N to stop")
                                                     while self._tts.is_speaking():

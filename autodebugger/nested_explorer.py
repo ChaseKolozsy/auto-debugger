@@ -22,6 +22,7 @@ class NestedValueExplorer:
         verbose: bool = False,
         action_provider: Optional[Callable[[], Optional[str]]] = None,
         children_provider: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+        data_fetcher: Optional[Callable[[int], Any]] = None,
     ):
         """
         Initialize the explorer.
@@ -29,16 +30,293 @@ class NestedValueExplorer:
         Args:
             tts: Text-to-speech instance (MacSayTTS)
             verbose: Whether to print debug info
+            action_provider: Callback to get user actions
+            children_provider: Callback to fetch DAP children
+            data_fetcher: Callback to fetch complete data from debugpy
         """
         self.tts = tts
         self.verbose = verbose
         self.max_items_before_prompt = 3  # Show first 3 items before asking to continue
-        self.max_depth = 5  # Maximum nesting depth to prevent infinite recursion
+        self.max_depth = 10  # Maximum nesting depth
         # Optional callback to retrieve user actions (for web UI). Should return an action string like 'y'/'n'.
         self._action_provider = action_provider
         # Optional callback to resolve DAP children lazily when a node has a 'ref'
         self._children_provider = children_provider
+        # Optional callback to fetch complete data when ellipsis is encountered
+        self._data_fetcher = data_fetcher
         
+        # Navigation state for interactive exploration
+        self._navigation_stack = []  # Stack of (container, index, name) tuples
+        self._current_container = None
+        self._current_index = 0
+        self._current_path = []
+        
+    def explore_interactive(self, name: str, value: Any) -> None:
+        """
+        Explore a value with interactive navigation (i=into, o=out, n=next).
+        
+        Handles ellipsis by fetching data only when user steps into it.
+        """
+        # Initialize navigation
+        self._navigation_stack = []
+        self._current_container = value
+        self._current_index = 0
+        self._current_path = [name]
+        
+        # Check if value needs initial parsing
+        if isinstance(value, dict) and "_parsed" in value:
+            self._current_container = value["_parsed"]
+        
+        # Start exploration
+        exploring = True
+        while exploring:
+            # Announce current position
+            path_str = ".".join(self._current_path) if len(self._current_path) > 1 else self._current_path[0]
+            
+            # Check what we're looking at
+            if self._is_ellipsis(self._current_container):
+                # We have ellipsis - offer to fetch
+                announcement = f"At {path_str}: Data is truncated (ellipsis). Press I to fetch complete data, N to skip, O to go back"
+                self.tts.speak(announcement)
+                print(f"[TTS] {announcement}")
+                self._wait_for_speech()
+                
+                action = self._get_navigation_action()
+                if action == 'i':
+                    # Fetch the complete data
+                    if self._data_fetcher and hasattr(self._current_container, '__ref__'):
+                        ref = self._current_container.__ref__
+                        announcement = f"Fetching complete data for {path_str}..."
+                        self.tts.speak(announcement)
+                        print(f"[TTS] {announcement}")
+                        self._wait_for_speech()
+                        
+                        fetched_data = self._data_fetcher(ref)
+                        if fetched_data is not None:
+                            self._current_container = fetched_data
+                            # Continue to explore the fetched data
+                        else:
+                            self.tts.speak("Could not fetch data")
+                            print("[TTS] Could not fetch data")
+                    else:
+                        self.tts.speak("No reference available to fetch data")
+                        print("[TTS] No reference available to fetch data")
+                        
+                elif action == 'o':
+                    # Step out
+                    if self._navigation_stack:
+                        parent_container, parent_index, parent_name = self._navigation_stack.pop()
+                        self._current_container = parent_container
+                        self._current_index = parent_index
+                        self._current_path.pop()
+                    else:
+                        self.tts.speak("Already at top level")
+                        print("[TTS] Already at top level")
+                        
+                elif action == 'n':
+                    # Skip to next at current level
+                    self._move_to_next()
+                    
+                elif action == 'q' or action == 'quit':
+                    exploring = False
+                    
+            elif isinstance(self._current_container, (list, tuple)):
+                # Navigate list/tuple
+                self._navigate_sequence(path_str)
+                
+            elif isinstance(self._current_container, dict):
+                # Navigate dictionary
+                self._navigate_dict(path_str)
+                
+            else:
+                # Simple value - announce and offer navigation
+                self._announce_current_value(path_str)
+                action = self._get_navigation_action()
+                
+                if action == 'n':
+                    self._move_to_next()
+                elif action == 'o':
+                    if self._navigation_stack:
+                        parent_container, parent_index, parent_name = self._navigation_stack.pop()
+                        self._current_container = parent_container
+                        self._current_index = parent_index
+                        self._current_path.pop()
+                    else:
+                        exploring = False
+                elif action == 'q':
+                    exploring = False
+    
+    def _is_ellipsis(self, value: Any) -> bool:
+        """Check if a value contains or is ellipsis."""
+        if value is Ellipsis:
+            return True
+        if isinstance(value, str) and ('[...]' in value or '{...}' in value):
+            return True
+        if isinstance(value, dict) and value.get("_needs_fetch"):
+            return True
+        return False
+    
+    def _get_navigation_action(self) -> str:
+        """Get navigation action from user (i/o/n/q)."""
+        self.tts.speak("Press I to step into, O to step out, N for next, Q to quit")
+        print("[TTS] Press I to step into, O to step out, N for next, Q to quit")
+        self._wait_for_speech()
+        
+        if self._action_provider:
+            while True:
+                action = self._action_provider()
+                if action:
+                    return action.strip().lower()
+                time.sleep(0.1)
+        else:
+            return input().strip().lower()
+    
+    def _navigate_sequence(self, path_str: str) -> None:
+        """Navigate through a list or tuple."""
+        container = self._current_container
+        if self._current_index >= len(container):
+            self._current_index = 0
+            
+        item = container[self._current_index]
+        item_path = f"{path_str}[{self._current_index}]"
+        
+        # Check if item is ellipsis or complex
+        if self._is_ellipsis(item):
+            announcement = f"{item_path} contains truncated data. Press I to fetch, N for next item"
+            self.tts.speak(announcement)
+            print(f"[TTS] {announcement}")
+        elif isinstance(item, (list, tuple, dict)):
+            announcement = f"{item_path} is {type(item).__name__}. Press I to explore, N for next"
+            self.tts.speak(announcement)  
+            print(f"[TTS] {announcement}")
+        else:
+            announcement = f"{item_path} = {item}"
+            self.tts.speak(announcement)
+            print(f"[TTS] {announcement}")
+        
+        self._wait_for_speech()
+        action = self._get_navigation_action()
+        
+        if action == 'i':
+            # Step into this item
+            self._navigation_stack.append((container, self._current_index, path_str))
+            self._current_container = item
+            self._current_index = 0
+            self._current_path.append(f"[{self._current_index}]")
+        elif action == 'n':
+            # Move to next item
+            self._current_index += 1
+            if self._current_index >= len(container):
+                self.tts.speak("End of list. Wrapping to beginning.")
+                print("[TTS] End of list. Wrapping to beginning.")
+                self._current_index = 0
+        elif action == 'o':
+            # Step out
+            if self._navigation_stack:
+                parent_container, parent_index, parent_name = self._navigation_stack.pop()
+                self._current_container = parent_container
+                self._current_index = parent_index
+                self._current_path.pop()
+    
+    def _navigate_dict(self, path_str: str) -> None:
+        """Navigate through a dictionary."""
+        container = self._current_container
+        keys = list(container.keys())
+        
+        if not keys:
+            self.tts.speak(f"{path_str} is empty dictionary")
+            print(f"[TTS] {path_str} is empty dictionary")
+            return
+            
+        if self._current_index >= len(keys):
+            self._current_index = 0
+            
+        key = keys[self._current_index]
+        value = container[key]
+        item_path = f"{path_str}.{key}" if not key.startswith('[') else f"{path_str}{key}"
+        
+        # Check if value is ellipsis or complex
+        if self._is_ellipsis(value):
+            announcement = f"{item_path} contains truncated data. Press I to fetch, N for next"
+            self.tts.speak(announcement)
+            print(f"[TTS] {announcement}")
+        elif isinstance(value, (list, tuple, dict)):
+            announcement = f"{item_path} is {type(value).__name__}. Press I to explore, N for next"
+            self.tts.speak(announcement)
+            print(f"[TTS] {announcement}")
+        else:
+            announcement = f"{item_path} = {value}"
+            self.tts.speak(announcement)
+            print(f"[TTS] {announcement}")
+        
+        self._wait_for_speech()
+        action = self._get_navigation_action()
+        
+        if action == 'i':
+            # Step into this value
+            self._navigation_stack.append((container, self._current_index, path_str))
+            self._current_container = value
+            self._current_index = 0
+            self._current_path.append(f".{key}")
+        elif action == 'n':
+            # Move to next key
+            self._current_index += 1
+            if self._current_index >= len(keys):
+                self.tts.speak("End of dictionary. Wrapping to beginning.")
+                print("[TTS] End of dictionary. Wrapping to beginning.")
+                self._current_index = 0
+        elif action == 'o':
+            # Step out
+            if self._navigation_stack:
+                parent_container, parent_index, parent_name = self._navigation_stack.pop()
+                self._current_container = parent_container
+                self._current_index = parent_index
+                self._current_path.pop()
+    
+    def _announce_current_value(self, path_str: str) -> None:
+        """Announce the current simple value."""
+        value = self._current_container
+        announcement = f"{path_str} = {value}"
+        self.tts.speak(announcement)
+        print(f"[TTS] {announcement}")
+        self._wait_for_speech()
+    
+    def _move_to_next(self) -> None:
+        """Move to next item at current level or step out if at end."""
+        if self._navigation_stack:
+            # We're inside something, try to move to next in parent
+            parent_container, parent_index, parent_name = self._navigation_stack[-1]
+            if isinstance(parent_container, (list, tuple)):
+                if parent_index + 1 < len(parent_container):
+                    # Move to next in parent
+                    self._navigation_stack.pop()
+                    self._current_container = parent_container
+                    self._current_index = parent_index + 1
+                    self._current_path.pop()
+                else:
+                    # At end of parent, step out
+                    self._navigation_stack.pop()
+                    self._current_container = parent_container
+                    self._current_index = parent_index
+                    self._current_path.pop()
+            elif isinstance(parent_container, dict):
+                keys = list(parent_container.keys())
+                if parent_index + 1 < len(keys):
+                    # Move to next in parent
+                    self._navigation_stack.pop()
+                    self._current_container = parent_container
+                    self._current_index = parent_index + 1
+                    self._current_path.pop()
+                else:
+                    # At end of parent, step out
+                    self._navigation_stack.pop()
+                    self._current_container = parent_container
+                    self._current_index = parent_index
+                    self._current_path.pop()
+        else:
+            self.tts.speak("No next item at top level")
+            print("[TTS] No next item at top level")
+    
     def explore_value(self, name: str, value: Any, depth: int = 0) -> None:
         """
         Explore a value interactively, prompting for deeper exploration.
