@@ -239,7 +239,7 @@ class StepControlHandler(BaseHTTPRequestHandler):
                 <button onclick="sendAction('explore')">Explore Changes (E)</button>
                 <button onclick="sendAction('variables_explore')">Explore Variables (W)</button>
                 <button class="success" onclick="sendAction('auto')">Auto Mode (A)</button>
-                <button onclick="sendAction('continue')">Continue (C)</button>
+                <button onclick="sendAction('continue')">Continue</button>
                 <button class="danger" onclick="sendAction('quit')">Quit (Q)</button>
             </div>
         </div>
@@ -253,7 +253,7 @@ class StepControlHandler(BaseHTTPRequestHandler):
                 <li><b>e</b> - Explore changed variables</li>
                 <li><b>w</b> - Explore all variables</li>
                 <li><b>a</b> - Switch to auto mode</li>
-                <li><b>c</b> - Continue execution</li>
+                <li><b>Continue button</b> - Continue execution (c shortcut removed for copy/paste)</li>
                 <li><b>q</b> - Quit debugging</li>
             </ul>
         </div>
@@ -322,8 +322,7 @@ class StepControlHandler(BaseHTTPRequestHandler):
                 sendAction('variables_explore');
             } else if (e.key === 'a' || e.key === 'A') {
                 sendAction('auto');
-            } else if (e.key === 'c' || e.key === 'C') {
-                sendAction('continue');
+            // 'c' shortcut removed to allow copy/paste
             } else if (e.key === 'q' || e.key === 'Q') {
                 sendAction('quit');
             }

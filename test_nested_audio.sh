@@ -29,6 +29,7 @@ echo ""
 python -m autodebugger run \
     --manual \
     --manual-web \
+    --mamual-from 10 \
     --manual-audio \
     --manual-rate 210 \
     --stop \
