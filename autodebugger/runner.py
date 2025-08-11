@@ -144,9 +144,9 @@ class AutoDebugger:
         return False
     
     def _fetch_complete_value(self, var_ref: int, max_depth: int = 20, seen_refs: Optional[set] = None) -> Any:
-        """Fetch COMPLETE value from debugpy - recursively fetch EVERYTHING.
+        """Fetch ONLY the actual data from debugpy - no Python internals.
         
-        This fetches the entire data structure with no ellipses remaining.
+        Filters out all methods, special variables, and Python-specific clutter.
         """
         if not self.client or var_ref <= 0 or max_depth <= 0:
             return None
@@ -166,56 +166,84 @@ class AutoDebugger:
                 
             variables = response.body.get("variables", [])
             
-            # Check if this is a list/tuple or dict based on the keys
-            is_sequence = all(v.get("name", "").isdigit() or v.get("name") == "len()" 
-                             for v in variables)
+            # Filter out all the Python clutter
+            filtered_vars = []
+            for var in variables:
+                name = var.get("name", "")
+                # Skip ALL these:
+                # - Special variables section
+                # - Function variables section  
+                # - Methods (append, clear, copy, etc.)
+                # - Private attributes (__xxx__)
+                # - len() and other special entries
+                if (name == "special variables" or 
+                    name == "function variables" or
+                    name.startswith("__") or
+                    name == "len()" or
+                    name in {"append", "clear", "copy", "count", "extend", "index", 
+                            "insert", "pop", "remove", "reverse", "sort", "get",
+                            "items", "keys", "values", "update", "setdefault",
+                            "popitem", "fromkeys"}):
+                    continue
+                filtered_vars.append(var)
+            
+            # Now check if this is a list/dict based on actual data keys
+            if not filtered_vars:
+                return None
+                
+            # Check if all remaining keys are numeric (it's a list)
+            is_sequence = all(v.get("name", "").isdigit() for v in filtered_vars)
             
             if is_sequence:
-                # Build as a list
+                # Build as a list - ONLY the actual values
                 items = []
-                for var in variables:
-                    name = var.get("name", "")
-                    if name == "len()" or name.startswith("__"):
-                        continue
-                    
+                # Sort by numeric index
+                sorted_vars = sorted(filtered_vars, key=lambda v: int(v.get("name", "0")))
+                for var in sorted_vars:
                     value_str = var.get("value", "")
                     child_ref = var.get("variablesReference", 0)
                     
                     if child_ref > 0:
-                        # Recursively fetch ALL children
+                        # Recursively fetch children
                         child_value = self._fetch_complete_value(child_ref, max_depth - 1, seen_refs)
-                        items.append(child_value if child_value is not None else value_str)
+                        if child_value is not None:
+                            items.append(child_value)
+                        else:
+                            # Parse the string value
+                            parsed = self._parse_string_to_object(value_str)
+                            items.append(parsed)
                     else:
-                        # Parse the value, checking for ellipsis
+                        # Parse the value
                         parsed = self._parse_string_to_object(value_str)
-                        # If it still has ellipsis markers, keep the string
                         if isinstance(parsed, dict) and parsed.get("_needs_fetch"):
+                            # Still has ellipsis, just use string
                             items.append(value_str)
                         else:
                             items.append(parsed)
                 return items
             else:
-                # Build as a dict
+                # Build as a dict - ONLY actual key-value pairs
                 result = {}
-                for var in variables:
+                for var in filtered_vars:
                     name = var.get("name", "")
-                    # Skip private/special attributes for cleaner output
-                    if name.startswith("__") and name.endswith("__"):
-                        continue
-                    if name == "len()":
-                        continue
-                        
+                    # Clean up quoted keys like "'key'" -> "key"
+                    if name.startswith("'") and name.endswith("'"):
+                        name = name[1:-1]
+                    
                     value_str = var.get("value", "")
                     child_ref = var.get("variablesReference", 0)
                     
                     if child_ref > 0:
-                        # Recursively fetch ALL children
+                        # Recursively fetch children
                         child_value = self._fetch_complete_value(child_ref, max_depth - 1, seen_refs)
-                        result[name] = child_value if child_value is not None else value_str
+                        if child_value is not None:
+                            result[name] = child_value
+                        else:
+                            parsed = self._parse_string_to_object(value_str)
+                            result[name] = parsed
                     else:
                         # Parse the value
                         parsed = self._parse_string_to_object(value_str)
-                        # If it still has ellipsis markers, keep the string
                         if isinstance(parsed, dict) and parsed.get("_needs_fetch"):
                             result[name] = value_str
                         else:
