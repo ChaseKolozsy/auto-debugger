@@ -29,7 +29,7 @@ echo ""
 python -m autodebugger run \
     --manual \
     --manual-web \
-    --manual-from tests/test_nested_structures.py:10 \
+    --manual-from tests/test_nested_structures.py:17 \
     --manual-audio \
     --manual-rate 210 \
     --stop \

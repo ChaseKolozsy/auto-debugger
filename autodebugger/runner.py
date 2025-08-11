@@ -1216,32 +1216,8 @@ class AutoDebugger:
                                 for scope_name in ("Locals", "locals", "Local", "Globals", "globals"):
                                     scope_vars = vars_payload.get(scope_name)
                                     if isinstance(scope_vars, dict):
-                                        for var_name, var_info in scope_vars.items():
-                                            if isinstance(var_info, dict) and "value" in var_info:
-                                                # Extract the string value and try to parse it
-                                                value_str = var_info["value"]
-                                                parsed_value = self._parse_string_to_object(value_str)
-                                                
-                                                # Check if we need to fetch complete data
-                                                if isinstance(parsed_value, dict) and parsed_value.get("_needs_fetch"):
-                                                    # We have truncated data, fetch the complete value
-                                                    var_ref = var_info.get("ref", 0)
-                                                    if var_ref > 0 and self.client:
-                                                        complete_value = self._fetch_complete_value(var_ref)
-                                                        if complete_value is not None:
-                                                            parsed_value = complete_value
-                                                        else:
-                                                            # Couldn't fetch, use preview
-                                                            parsed_value = parsed_value.get("_preview", value_str)
-                                                
-                                                # Store both the parsed value and the reference if available
-                                                if "ref" in var_info or "children" in var_info:
-                                                    # Keep the structured info for lazy loading
-                                                    value = {"_parsed": parsed_value, "_ref": var_info.get("ref"), "_children": var_info.get("children")}
-                                                else:
-                                                    value = parsed_value
-                                            else:
-                                                value = self._parse_string_to_object(var_info) if isinstance(var_info, str) else var_info
+                                        for var_name, value in scope_vars.items():
+                                            # Variables are now already parsed/fetched - use them directly
                                             all_vars.append((scope_name, var_name, value))
 
                                 if all_vars:
@@ -1257,9 +1233,8 @@ class AutoDebugger:
                                         if self._controller:
                                             items_payload = []
                                             for i, (scope_name, var_name, value) in enumerate(page_vars):
-                                                # Extract the actual value for preview if it's a DAP structure
-                                                preview_value = value["_parsed"] if isinstance(value, dict) and "_parsed" in value else value
-                                                preview = format_nested_value_summary(preview_value)
+                                                # Value is already parsed/fetched - use directly
+                                                preview = format_nested_value_summary(value)
                                                 items_payload.append({
                                                     "index": i,
                                                     "name": f"{var_name} ({scope_name})",
@@ -1278,9 +1253,8 @@ class AutoDebugger:
                                             while self._tts.is_speaking():
                                                 time.sleep(0.05)
                                             for i, (_s, var_name, value) in enumerate(page_vars):
-                                                # Extract the actual value for announcement if it's a DAP structure
-                                                actual_value = value["_parsed"] if isinstance(value, dict) and "_parsed" in value else value
-                                                brief_value = format_nested_value_summary(actual_value)
+                                                # Value is already parsed/fetched - use directly
+                                                brief_value = format_nested_value_summary(value)
                                                 self._tts.speak(f"{i}: {var_name} — {brief_value}")
                                                 while self._tts.is_speaking():
                                                     time.sleep(0.05)
