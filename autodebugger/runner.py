@@ -768,11 +768,14 @@ class AutoDebugger:
                                 # Don't automatically read variables - only changes
                                 # Variables can be read on demand with 'v' key
                                 
-                                # Announce changes
+                                # Announce changes with clean parsed values
                                 if variables_delta:
-                                    delta_summary = summarize_delta(variables_delta)
+                                    # Extract clean values for TTS announcement
+                                    clean_delta = self._extract_display_values(variables_delta)
+                                    delta_summary = summarize_delta(clean_delta)
                                     if delta_summary and delta_summary != "no changes":
                                         self._tts.speak(f"Changes: {delta_summary}")
+                                        print(f"[TTS] Changes: {delta_summary}")
                                         # Wait for changes announcement to finish
                                         while self._tts.is_speaking():
                                             time.sleep(0.05)

@@ -221,22 +221,64 @@ def _prompt(prompt: str) -> str:
 
 
 def summarize_delta(delta: Dict[str, Any], max_len: int = 120) -> str:
+    """Summarize variable changes for TTS announcement.
+    
+    Handles both raw DAP format and clean parsed values.
+    """
     parts: List[str] = []
     for key, value in delta.items():
-        if isinstance(value, dict) and "value" in value:
-            child = value.get("children")
-            if isinstance(child, dict) and child:
-                child_keys = ", ".join(list(child.keys())[:5])
-                parts.append(f"{key} changed; fields: {child_keys}")
+        # Skip internal keys
+        if key.startswith('_'):
+            continue
+            
+        # Handle scope dictionaries (Locals, Globals, etc.)
+        if isinstance(value, dict):
+            # Check if this is a scope with multiple variables
+            if all(not k.startswith('_') for k in value.keys()):
+                # This is a scope, summarize its contents
+                for var_name, var_value in value.items():
+                    if isinstance(var_value, (list, tuple)):
+                        parts.append(f"{var_name} = list of {len(var_value)}")
+                    elif isinstance(var_value, dict):
+                        # Check if it's a DAP structure or a regular dict
+                        if "value" in var_value and isinstance(var_value.get("value"), str):
+                            # Still in DAP format, just say it changed
+                            parts.append(f"{var_name} changed")
+                        else:
+                            # Clean dict
+                            parts.append(f"{var_name} = dict with {len(var_value)} keys")
+                    elif var_value is None:
+                        parts.append(f"{var_name} = None")
+                    else:
+                        s = str(var_value)
+                        if len(s) > 40:
+                            s = s[:37] + "..."
+                        parts.append(f"{var_name} = {s}")
             else:
-                parts.append(f"{key} changed")
+                # Single variable or DAP structure
+                if "value" in value and isinstance(value.get("value"), str):
+                    # Still in DAP format
+                    parts.append(f"{key} changed")
+                else:
+                    # Clean value
+                    if isinstance(value, (list, tuple)):
+                        parts.append(f"{key} = list of {len(value)}")
+                    elif isinstance(value, dict):
+                        parts.append(f"{key} = dict with {len(value)} keys")
+                    else:
+                        s = str(value)
+                        if len(s) > 40:
+                            s = s[:37] + "..."
+                        parts.append(f"{key} = {s}")
         elif value is None:
             parts.append(f"{key} removed")
         else:
+            # Simple value
             s = str(value)
-            if len(s) > 60:
-                s = s[:57] + "..."
+            if len(s) > 40:
+                s = s[:37] + "..."
             parts.append(f"{key} = {s}")
+            
     if not parts:
         return "no changes"
     text = "; ".join(parts)
