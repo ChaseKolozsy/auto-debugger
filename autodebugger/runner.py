@@ -945,9 +945,6 @@ class AutoDebugger:
                                     # Don't auto-step after exploring; re-prompt for next action
                                     should_step_after = False
                                     continue
-                                else:
-                                    # Unknown action: ignore and re-prompt
-                                    continue
                         else:
                             # Not in manual mode - continue stepping automatically
                             pass
