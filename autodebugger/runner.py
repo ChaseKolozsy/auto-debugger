@@ -930,11 +930,14 @@ class AutoDebugger:
                                                 if isinstance(var_info, dict) and "value" in var_info:
                                                     # Extract the string value and try to parse it
                                                     value_str = var_info["value"]
-                                                    value = self._parse_string_to_object(value_str)
+                                                    parsed_value = self._parse_string_to_object(value_str)
+                                                    print(f"[Debug] Variable '{var_name}': '{value_str}' -> {type(parsed_value).__name__}")
                                                     # Store both the parsed value and the reference if available
                                                     if "ref" in var_info or "children" in var_info:
                                                         # Keep the structured info for lazy loading
-                                                        value = {"_parsed": value, "_ref": var_info.get("ref"), "_children": var_info.get("children")}
+                                                        value = {"_parsed": parsed_value, "_ref": var_info.get("ref"), "_children": var_info.get("children")}
+                                                    else:
+                                                        value = parsed_value
                                                 else:
                                                     value = self._parse_string_to_object(var_info) if isinstance(var_info, str) else var_info
                                                 changed_vars.append((scope_name, var_name, value))

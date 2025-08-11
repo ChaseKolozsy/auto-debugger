@@ -48,10 +48,17 @@ class NestedValueExplorer:
             value: The value to explore (may be a dict with "_parsed" key for DAP values)
             depth: Current nesting depth
         """
+        print(f"\n[Explorer] === Exploring '{name}' at depth {depth} ===")
+        print(f"[Explorer] Raw value type: {type(value).__name__}")
+        if isinstance(value, dict) and len(str(value)) < 200:
+            print(f"[Explorer] Raw value: {value}")
+        
         # Check if this is a structured DAP value with parsed content
         if isinstance(value, dict) and "_parsed" in value:
             # Use the parsed value for exploration
             actual_value = value["_parsed"]
+            print(f"[Explorer] Found _parsed value, type: {type(actual_value).__name__}")
+            print(f"[Explorer] Parsed value: {actual_value}")
             # Keep reference info for lazy loading if needed
             ref_info = {"ref": value.get("_ref"), "children": value.get("_children")}
         else:
@@ -60,7 +67,9 @@ class NestedValueExplorer:
             
         # Continue with exploration using the actual value
         if depth >= self.max_depth:
-            self.tts.speak(f"Maximum depth reached for {name}")
+            announcement = f"Maximum depth reached for {name}"
+            self.tts.speak(announcement)
+            print(f"[TTS] {announcement}")
             return
             
         # Announce the variable and its type
@@ -94,21 +103,34 @@ class NestedValueExplorer:
     def _announce_primitive(self, name: str, value: Any, value_type: str) -> None:
         """Announce a primitive value."""
         if isinstance(value, str) and len(value) > 50:
-            self.tts.speak(f"{name} is string of length {len(value)}: {value[:50]}...")
+            announcement = f"{name} is string of length {len(value)}: {value[:50]}..."
+            self.tts.speak(announcement)
+            print(f"[TTS] {announcement}")
         else:
             # The value representation might have brackets/braces, so it will be converted by TTS
-            self.tts.speak(f"{name} is {value_type}: {value}")
+            announcement = f"{name} is {value_type}: {value}"
+            self.tts.speak(announcement)
+            print(f"[TTS] {announcement}")
             
     def _explore_sequence(self, name: str, sequence: Union[List, Tuple], seq_type: str, depth: int) -> None:
         """Explore a list or tuple."""
         length = len(sequence)
         
         if length == 0:
-            self.tts.speak(f"{name} is empty {seq_type}")
+            announcement = f"{name} is empty {seq_type}"
+            self.tts.speak(announcement)
+            print(f"[TTS] {announcement}")
             return
             
-        self.tts.speak(f"{name} is {seq_type} with {length} items")
+        # Announce with actual contents preview
+        announcement = f"{name} is {seq_type} with {length} items"
+        self.tts.speak(announcement)
+        print(f"[TTS] {announcement}")
         self._wait_for_speech()
+        
+        # Show preview of contents
+        if self.verbose or True:  # Always show for debugging
+            print(f"[Explorer] Contents: {sequence}")
         
         # Process items one at a time, asking for each
         i = 0
@@ -116,13 +138,21 @@ class NestedValueExplorer:
             item_name = f"{name}[{i}]"
             item_value = sequence[i]
             
-            # Give brief description
+            # Give brief description with actual value
             if isinstance(item_value, (int, float, str, bool, type(None))):
                 self._announce_primitive(item_name, item_value, type(item_value).__name__)
                 self._wait_for_speech()
             else:
                 item_type = type(item_value).__name__
-                self.tts.speak(f"{item_name} is {item_type}")
+                # Try to give more detail about the item
+                if isinstance(item_value, (list, tuple)):
+                    detail = f"{item_name} is {item_type} with {len(item_value)} items"
+                elif isinstance(item_value, dict):
+                    detail = f"{item_name} is {item_type} with {len(item_value)} keys"
+                else:
+                    detail = f"{item_name} is {item_type}"
+                self.tts.speak(detail)
+                print(f"[TTS] {detail}")
                 self._wait_for_speech()
                 
                 # For complex items, ask what to do
