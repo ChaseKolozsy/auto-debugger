@@ -775,13 +775,13 @@ class AutoDebugger:
                                 elif action == 'function':
                                     # Read function context on demand
                                     if self._tts:
-                                    # Try to get function name from frame info
-                                    func_name = None
-                                    if file and line:
-                                        # Simple heuristic - read function from file
-                                        try:
-                                            with open(file, 'r') as f:
-                                                lines = f.readlines()
+                                        # Try to get function name from frame info
+                                        func_name = None
+                                        if file and line:
+                                            # Simple heuristic - read function from file
+                                            try:
+                                                with open(file, 'r') as f:
+                                                    lines = f.readlines()
                                                 # Look backwards for def
                                                 for i in range(min(line - 1, len(lines) - 1), -1, -1):
                                                     if lines[i].strip().startswith('def '):
@@ -806,13 +806,13 @@ class AutoDebugger:
                                                                 while self._tts.is_speaking():
                                                                     time.sleep(0.05)
                                                             break
-                                        except Exception:
-                                            pass
-                                    
-                                    if not func_name:
-                                        self._tts.speak("Not currently in a function")
-                                        while self._tts.is_speaking():
-                                            time.sleep(0.05)
+                                            except Exception:
+                                                pass
+                                        
+                                        if not func_name:
+                                            self._tts.speak("Not currently in a function")
+                                            while self._tts.is_speaking():
+                                                time.sleep(0.05)
                                         # After speaking function context, re-prompt for another action
                                         should_step_after = False
                                         continue
