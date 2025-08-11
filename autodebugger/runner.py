@@ -143,50 +143,83 @@ class AutoDebugger:
             return any(self._contains_ellipsis(v) for v in obj.values())
         return False
     
-    def _fetch_complete_value(self, var_ref: int, max_depth: int = 5) -> Any:
-        """Fetch complete value from debugpy using variable reference.
+    def _fetch_complete_value(self, var_ref: int, max_depth: int = 20, seen_refs: Optional[set] = None) -> Any:
+        """Fetch COMPLETE value from debugpy - recursively fetch EVERYTHING.
         
-        Recursively fetches all data until no ellipses remain.
+        This fetches the entire data structure with no ellipses remaining.
         """
         if not self.client or var_ref <= 0 or max_depth <= 0:
             return None
+        
+        # Track seen references to avoid infinite loops
+        if seen_refs is None:
+            seen_refs = set()
+        if var_ref in seen_refs:
+            return "<circular reference>"
+        seen_refs.add(var_ref)
             
         try:
-            # Fetch variables for this reference
+            # Fetch ALL variables for this reference
             response = self.client.request("variables", {"variablesReference": var_ref})
             if not response or not response.body:
                 return None
                 
             variables = response.body.get("variables", [])
             
-            # Build the complete structure
-            result = {}
-            for var in variables:
-                name = var.get("name", "")
-                value_str = var.get("value", "")
-                child_ref = var.get("variablesReference", 0)
-                
-                # Skip special attributes
-                if name.startswith("__") and name.endswith("__"):
-                    continue
-                    
-                # If this has children, fetch them recursively
-                if child_ref > 0:
-                    child_value = self._fetch_complete_value(child_ref, max_depth - 1)
-                    if child_value is not None:
-                        result[name] = child_value
-                    else:
-                        # Couldn't fetch children, use the string representation
-                        result[name] = self._parse_string_to_object(value_str)
-                else:
-                    # No children, parse the value
-                    result[name] = self._parse_string_to_object(value_str)
+            # Check if this is a list/tuple or dict based on the keys
+            is_sequence = all(v.get("name", "").isdigit() or v.get("name") == "len()" 
+                             for v in variables)
             
-            # Try to determine if this should be a list or dict
-            if all(k.isdigit() for k in result.keys()):
-                # All keys are numbers, this is likely a list
-                return [result[str(i)] for i in range(len(result)) if str(i) in result]
+            if is_sequence:
+                # Build as a list
+                items = []
+                for var in variables:
+                    name = var.get("name", "")
+                    if name == "len()" or name.startswith("__"):
+                        continue
+                    
+                    value_str = var.get("value", "")
+                    child_ref = var.get("variablesReference", 0)
+                    
+                    if child_ref > 0:
+                        # Recursively fetch ALL children
+                        child_value = self._fetch_complete_value(child_ref, max_depth - 1, seen_refs)
+                        items.append(child_value if child_value is not None else value_str)
+                    else:
+                        # Parse the value, checking for ellipsis
+                        parsed = self._parse_string_to_object(value_str)
+                        # If it still has ellipsis markers, keep the string
+                        if isinstance(parsed, dict) and parsed.get("_needs_fetch"):
+                            items.append(value_str)
+                        else:
+                            items.append(parsed)
+                return items
             else:
+                # Build as a dict
+                result = {}
+                for var in variables:
+                    name = var.get("name", "")
+                    # Skip private/special attributes for cleaner output
+                    if name.startswith("__") and name.endswith("__"):
+                        continue
+                    if name == "len()":
+                        continue
+                        
+                    value_str = var.get("value", "")
+                    child_ref = var.get("variablesReference", 0)
+                    
+                    if child_ref > 0:
+                        # Recursively fetch ALL children
+                        child_value = self._fetch_complete_value(child_ref, max_depth - 1, seen_refs)
+                        result[name] = child_value if child_value is not None else value_str
+                    else:
+                        # Parse the value
+                        parsed = self._parse_string_to_object(value_str)
+                        # If it still has ellipsis markers, keep the string
+                        if isinstance(parsed, dict) and parsed.get("_needs_fetch"):
+                            result[name] = value_str
+                        else:
+                            result[name] = parsed
                 return result
                 
         except Exception as e:
@@ -664,33 +697,19 @@ class AutoDebugger:
                                 if vname in skip_names:
                                     continue
                                 vvalue = v.get("value")
-                                entry: Dict[str, Any] = {"value": vvalue}
-                                # Shallow expand user variables if expandable
                                 vref = v.get("variablesReference")
+                                
+                                # ALWAYS fetch complete data if there's a reference
                                 if isinstance(vref, int) and vref > 0:
-                                    try:
-                                        child_res = client.request("variables", {"variablesReference": vref})
-                                        children = child_res.body.get("variables", []) if child_res.body else []
-                                        child_map: Dict[str, Any] = {}
-                                        for c in children[:30]:  # limit to first 30
-                                            cname = str(c.get("name"))
-                                            if cname in skip_names:
-                                                continue
-                                            cval = c.get("value")
-                                            cref = c.get("variablesReference")
-                                            centry: Dict[str, Any] = {"value": cval}
-                                            if isinstance(cref, int) and cref > 0:
-                                                centry["ref"] = cref
-                                            child_map[cname] = centry
-                                        if child_map:
-                                            entry["children"] = child_map
-                                    except Exception:
-                                        pass
-                                # Always include entry; even without children, it keeps structure for explorer
-                                # Store a 'ref' if expandable so explorer can lazily fetch deeper
-                                if isinstance(vref, int) and vref > 0 and "children" not in entry:
-                                    entry["ref"] = vref
-                                scope_map[vname] = entry
+                                    complete = self._fetch_complete_value(vref)
+                                    if complete is not None:
+                                        scope_map[vname] = complete
+                                    else:
+                                        # Fallback to string value
+                                        scope_map[vname] = self._parse_string_to_object(vvalue)
+                                else:
+                                    # No reference, just parse the value
+                                    scope_map[vname] = self._parse_string_to_object(vvalue)
                             vars_payload[scope_name] = scope_map
 
                         # Status/error info
@@ -1023,31 +1042,20 @@ class AutoDebugger:
                                             for var_name in scope_delta.keys():
                                                 var_info = scope_vars.get(var_name)
                                                 if isinstance(var_info, dict) and "value" in var_info:
-                                                    # Extract the string value and try to parse it
-                                                    value_str = var_info["value"]
-                                                    parsed_value = self._parse_string_to_object(value_str)
-                                                    
-                                                    # Check if we need to fetch complete data
-                                                    if isinstance(parsed_value, dict) and parsed_value.get("_needs_fetch"):
-                                                        # We have truncated data, fetch the complete value
-                                                        var_ref = var_info.get("ref", 0)
-                                                        if var_ref > 0 and self.client:
-                                                            print(f"[Debug] Fetching complete data for '{var_name}' (ref={var_ref})")
-                                                            complete_value = self._fetch_complete_value(var_ref)
-                                                            if complete_value is not None:
-                                                                parsed_value = complete_value
-                                                                print(f"[Debug] Fetched complete value for '{var_name}': {type(complete_value).__name__}")
-                                                            else:
-                                                                # Couldn't fetch, use preview
-                                                                parsed_value = parsed_value.get("_preview", value_str)
-                                                    
-                                                    print(f"[Debug] Variable '{var_name}': {type(parsed_value).__name__}")
-                                                    # Store both the parsed value and the reference if available
-                                                    if "ref" in var_info or "children" in var_info:
-                                                        # Keep the structured info for lazy loading
-                                                        value = {"_parsed": parsed_value, "_ref": var_info.get("ref"), "_children": var_info.get("children")}
+                                                    # ALWAYS fetch complete data if there's a reference
+                                                    var_ref = var_info.get("ref", 0)
+                                                    if var_ref > 0 and self.client:
+                                                        print(f"[Debug] Fetching COMPLETE data for '{var_name}' (ref={var_ref})")
+                                                        complete_value = self._fetch_complete_value(var_ref)
+                                                        if complete_value is not None:
+                                                            value = complete_value
+                                                            print(f"[Debug] Got complete structure for '{var_name}': {type(complete_value).__name__}")
+                                                        else:
+                                                            # Couldn't fetch, parse the string
+                                                            value = self._parse_string_to_object(var_info["value"])
                                                     else:
-                                                        value = parsed_value
+                                                        # No reference, just parse the value
+                                                        value = self._parse_string_to_object(var_info["value"])
                                                 else:
                                                     value = self._parse_string_to_object(var_info) if isinstance(var_info, str) else var_info
                                                 changed_vars.append((scope_name, var_name, value))
@@ -1132,8 +1140,8 @@ class AutoDebugger:
                                                             time.sleep(0.05)
                                                     # Explore via nested explorer if available
                                                     if self._nested_explorer:
-                                                        # Use interactive exploration with i/o/n navigation
-                                                        self._nested_explorer.explore_interactive(var_name, value)
+                                                        # Read the complete structure naturally
+                                                        self._nested_explorer.read_complete_structure(var_name, value)
                                                     # Ask whether to explore another
                                                     if self._tts:
                                                         self._tts.speak("Explore another variable? Y for yes, N to stop")
@@ -1287,8 +1295,8 @@ class AutoDebugger:
                                                     while self._tts.is_speaking():
                                                         time.sleep(0.05)
                                                 if self._nested_explorer:
-                                                    # Use interactive exploration with i/o/n navigation
-                                                    self._nested_explorer.explore_interactive(var_name, value)
+                                                    # Read the complete structure naturally
+                                                    self._nested_explorer.read_complete_structure(var_name, value)
                                                 if self._tts:
                                                     self._tts.speak("Explore another variable? Y for yes, N to stop")
                                                     while self._tts.is_speaking():

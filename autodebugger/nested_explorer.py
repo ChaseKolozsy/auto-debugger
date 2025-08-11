@@ -317,6 +317,71 @@ class NestedValueExplorer:
             self.tts.speak("No next item at top level")
             print("[TTS] No next item at top level")
     
+    def read_complete_structure(self, name: str, value: Any) -> None:
+        """Read out a complete data structure naturally, like reading code.
+        
+        For lists: "1 comma 2 comma 3"
+        For dicts: "key1 colon value1 comma key2 colon value2"
+        For nested: reads the entire structure recursively
+        """
+        announcement = f"{name} equals {self._format_for_speech(value)}"
+        self.tts.speak(announcement)
+        print(f"[TTS] {announcement}")
+        self._wait_for_speech()
+    
+    def _format_for_speech(self, value: Any, depth: int = 0) -> str:
+        """Format a value for natural speech reading.
+        
+        Lists: items separated by 'comma'
+        Dicts: key colon value pairs separated by 'comma'
+        """
+        if depth > 10:  # Safety limit
+            return "deeply nested structure"
+            
+        if value is None:
+            return "None"
+        elif isinstance(value, bool):
+            return str(value)
+        elif isinstance(value, (int, float)):
+            return str(value)
+        elif isinstance(value, str):
+            # For short strings, read them directly
+            if len(value) < 50:
+                return f"string {value}"
+            else:
+                return f"string of {len(value)} characters"
+        elif isinstance(value, list):
+            if not value:
+                return "empty list"
+            # Read items separated by comma
+            items = []
+            for item in value:
+                items.append(self._format_for_speech(item, depth + 1))
+            return f"list of {', '.join(items)}"
+        elif isinstance(value, tuple):
+            if not value:
+                return "empty tuple"
+            items = []
+            for item in value:
+                items.append(self._format_for_speech(item, depth + 1))
+            return f"tuple of {', '.join(items)}"
+        elif isinstance(value, dict):
+            if not value:
+                return "empty dict"
+            # Skip private attributes for cleaner reading
+            items = []
+            for k, v in value.items():
+                if not (isinstance(k, str) and k.startswith('_')):
+                    key_str = str(k)
+                    val_str = self._format_for_speech(v, depth + 1)
+                    items.append(f"{key_str} colon {val_str}")
+            if items:
+                return f"dict with {', '.join(items)}"
+            else:
+                return "dict with private attributes"
+        else:
+            return f"{type(value).__name__} object"
+    
     def explore_value(self, name: str, value: Any, depth: int = 0) -> None:
         """
         Explore a value interactively, prompting for deeper exploration.
