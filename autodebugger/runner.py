@@ -122,8 +122,8 @@ class AutoDebugger:
     def _extract_display_values(self, vars_dict: Dict[str, Any]) -> Dict[str, Any]:
         """Extract displayable values from structured variable format.
         
-        Converts {"value": ..., "ref": ..., "children": ...} format to display-friendly format
-        while preserving the ability to show nested structures.
+        Converts {"value": ..., "ref": ..., "children": ...} format to clean, display-friendly format.
+        Parses string representations back to actual Python objects for clean display.
         """
         result = {}
         for scope_name, scope_vars in vars_dict.items():
@@ -136,28 +136,23 @@ class AutoDebugger:
                 if isinstance(var_info, dict):
                     # Handle structured format
                     if "value" in var_info:
-                        # If it has children, create a nested display format
-                        if "children" in var_info and isinstance(var_info["children"], dict):
-                            child_display = {}
-                            for child_name, child_info in var_info["children"].items():
-                                if isinstance(child_info, dict) and "value" in child_info:
-                                    child_display[child_name] = child_info["value"]
-                                else:
-                                    child_display[child_name] = child_info
-                            # Create a display object with the value and children
-                            scope_result[var_name] = {
-                                "value": var_info["value"],
-                                "children": child_display
-                            }
-                        else:
-                            # Just the value for simple variables
-                            scope_result[var_name] = var_info["value"]
+                        # Parse the string value to get the actual Python object
+                        value_str = var_info["value"]
+                        parsed_value = self._parse_string_to_object(value_str)
+                        
+                        # For the display, just show the clean parsed value
+                        # No need to show the complex DAP structure
+                        scope_result[var_name] = parsed_value
                     else:
                         # Fallback to the whole object if no value field
                         scope_result[var_name] = var_info
                 else:
                     # Handle simple values (backward compatibility)
-                    scope_result[var_name] = var_info
+                    # Try to parse if it's a string representation
+                    if isinstance(var_info, str):
+                        scope_result[var_name] = self._parse_string_to_object(var_info)
+                    else:
+                        scope_result[var_name] = var_info
             result[scope_name] = scope_result
         return result
 
@@ -955,7 +950,9 @@ class AutoDebugger:
                                             if self._controller:
                                                 items_payload = []
                                                 for i, (scope_name, var_name, value) in enumerate(page_vars):
-                                                    preview = format_nested_value_summary(value)
+                                                    # Extract the actual value for preview if it's a DAP structure
+                                                    preview_value = value["_parsed"] if isinstance(value, dict) and "_parsed" in value else value
+                                                    preview = format_nested_value_summary(preview_value)
                                                     items_payload.append({
                                                         "index": i,
                                                         "name": f"{var_name} ({scope_name})",
@@ -974,7 +971,9 @@ class AutoDebugger:
                                                 while self._tts.is_speaking():
                                                     time.sleep(0.05)
                                                 for i, (_s, var_name, value) in enumerate(page_vars):
-                                                    brief_value = format_nested_value_summary(value)
+                                                    # Extract the actual value for announcement if it's a DAP structure
+                                                    actual_value = value["_parsed"] if isinstance(value, dict) and "_parsed" in value else value
+                                                    brief_value = format_nested_value_summary(actual_value)
                                                     self._tts.speak(f"{i}: {var_name} — {brief_value}")
                                                     while self._tts.is_speaking():
                                                         time.sleep(0.05)
@@ -1018,6 +1017,8 @@ class AutoDebugger:
                                                             time.sleep(0.05)
                                                     # Explore via nested explorer if available
                                                     if self._nested_explorer:
+                                                        # If value has _parsed, it will be handled by the explorer
+                                                        # Otherwise use the value as-is
                                                         self._nested_explorer.explore_value(var_name, value)
                                                     # Ask whether to explore another
                                                     if self._tts:
@@ -1091,7 +1092,9 @@ class AutoDebugger:
                                         if self._controller:
                                             items_payload = []
                                             for i, (scope_name, var_name, value) in enumerate(page_vars):
-                                                preview = format_nested_value_summary(value)
+                                                # Extract the actual value for preview if it's a DAP structure
+                                                preview_value = value["_parsed"] if isinstance(value, dict) and "_parsed" in value else value
+                                                preview = format_nested_value_summary(preview_value)
                                                 items_payload.append({
                                                     "index": i,
                                                     "name": f"{var_name} ({scope_name})",
@@ -1110,7 +1113,9 @@ class AutoDebugger:
                                             while self._tts.is_speaking():
                                                 time.sleep(0.05)
                                             for i, (_s, var_name, value) in enumerate(page_vars):
-                                                brief_value = format_nested_value_summary(value)
+                                                # Extract the actual value for announcement if it's a DAP structure
+                                                actual_value = value["_parsed"] if isinstance(value, dict) and "_parsed" in value else value
+                                                brief_value = format_nested_value_summary(actual_value)
                                                 self._tts.speak(f"{i}: {var_name} — {brief_value}")
                                                 while self._tts.is_speaking():
                                                     time.sleep(0.05)
