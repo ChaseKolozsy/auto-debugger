@@ -120,7 +120,8 @@ class SharedState:
             "explore_active": False,
             "explore_items": [],   # list of {index, name, preview}
             "explore_page": 0,
-            "explore_total": 0
+            "explore_total": 0,
+            "explore_mode": None  # 'changes' or 'variables' to indicate which section
         }
         self._function_cache = {}  # Cache function contexts by (file, line)
     
@@ -622,14 +623,41 @@ class StepControlHandler(BaseHTTPRequestHandler):
             
             // Update variables
             if (state.variables) {
-                renderVariables(state.variables, 'variables');
-                previousVariables = state.variables;
+                // If exploration is active and mode is 'variables', render enumerated items
+                if (state.explore_active && state.explore_mode === 'variables' && 
+                    Array.isArray(state.explore_items) && state.explore_items.length > 0) {
+                    const container = document.getElementById('variables');
+                    let html = '';
+                    html += '<div class="section-title">Variables (page ' + (Number(state.explore_page || 0) + 1) + ')</div>';
+                    for (const item of state.explore_items) {
+                        html += '<div class="variable-item">';
+                        html += '<div class="variable-name">[' + item.index + '] ' + item.name + '</div>';
+                        html += '<div class="variable-value">' + String(item.preview || '') + '</div>';
+                        html += '</div>';
+                    }
+                    const total = Number(state.explore_total || 0);
+                    const page = Number(state.explore_page || 0);
+                    const hasNext = (page + 1) * 10 < total;
+                    html += '<div class="hint">Press 0-9 to explore, ' + (hasNext ? 'P next page, ' : '') + 'N cancel</div>';
+                    container.innerHTML = html;
+                    // Click to select
+                    container.querySelectorAll('.variable-item').forEach((node, idx) => {
+                        node.style.cursor = 'pointer';
+                        node.addEventListener('click', () => {
+                            sendAction(String(idx));
+                        });
+                    });
+                } else {
+                    renderVariables(state.variables, 'variables');
+                    previousVariables = state.variables;
+                }
             }
             
             // Update changes
             if (state.variables_delta) {
-                // If exploration is active, render enumerated items for selection
-                if (state.explore_active && Array.isArray(state.explore_items) && state.explore_items.length > 0) {
+                // If exploration is active and mode is 'changes', render enumerated items for selection
+                if (state.explore_active && state.explore_mode === 'changes' && 
+                    Array.isArray(state.explore_items) && state.explore_items.length > 0) {
                     const container = document.getElementById('changes');
                     let html = '';
                     html += '<div class="section-title">Changed (page ' + (Number(state.explore_page || 0) + 1) + ')</div>';
