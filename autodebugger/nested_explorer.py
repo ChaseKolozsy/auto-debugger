@@ -320,14 +320,68 @@ class NestedValueExplorer:
     def read_complete_structure(self, name: str, value: Any) -> None:
         """Read out a complete data structure naturally, like reading code.
         
-        For lists: "1 comma 2 comma 3"
-        For dicts: "key1 colon value1 comma key2 colon value2"
-        For nested: reads the entire structure recursively
+        For lists: "[1, 2, 3]"
+        For dicts: "{key1: value1, key2: value2}"
+        For nested: reads the entire structure recursively with brackets
         """
-        announcement = f"{name} equals {self._format_for_speech(value)}"
+        announcement = f"{name} equals {self._format_for_detailed_speech(value)}"
         self.tts.speak(announcement)
         print(f"[TTS] {announcement}")
         self._wait_for_speech()
+    
+    def _format_for_detailed_speech(self, value: Any, depth: int = 0) -> str:
+        """Format a value for detailed speech reading with brackets/braces.
+        
+        Lists: [item1, item2, item3]
+        Dicts: {key1: value1, key2: value2}
+        This is for exploration mode where we want to read it like code.
+        """
+        if depth > 10:  # Safety limit
+            return "deeply nested structure"
+            
+        if value is None:
+            return "None"
+        elif isinstance(value, bool):
+            return str(value)
+        elif isinstance(value, (int, float)):
+            return str(value)
+        elif isinstance(value, str):
+            # For strings, include quotes
+            if len(value) < 50:
+                return f'"{value}"'
+            else:
+                return f"string of {len(value)} characters"
+        elif isinstance(value, list):
+            if not value:
+                return "open bracket closed bracket"  # []
+            # Read with brackets
+            items = []
+            for item in value:
+                items.append(self._format_for_detailed_speech(item, depth + 1))
+            return f"open bracket {' comma '.join(items)} closed bracket"
+        elif isinstance(value, tuple):
+            if not value:
+                return "open paren closed paren"  # ()
+            items = []
+            for item in value:
+                items.append(self._format_for_detailed_speech(item, depth + 1))
+            return f"open paren {' comma '.join(items)} closed paren"
+        elif isinstance(value, dict):
+            if not value:
+                return "open brace closed brace"  # {}
+            # Skip private attributes for cleaner reading
+            items = []
+            for k, v in value.items():
+                if not (isinstance(k, str) and k.startswith('_')):
+                    key_str = f'"{k}"' if isinstance(k, str) else str(k)
+                    val_str = self._format_for_detailed_speech(v, depth + 1)
+                    items.append(f"{key_str} colon {val_str}")
+            if items:
+                return f"open brace {' comma '.join(items)} closed brace"
+            else:
+                return "dict with private attributes"
+        else:
+            return f"{type(value).__name__} object"
     
     def _format_for_speech(self, value: Any, depth: int = 0) -> str:
         """Format a value for natural speech reading.

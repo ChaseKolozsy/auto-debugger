@@ -255,6 +255,7 @@ class StepControlHandler(BaseHTTPRequestHandler):
                 <li><b>a</b> - Switch to auto mode</li>
                 <li><b>Continue button</b> - Continue execution (c shortcut removed for copy/paste)</li>
                 <li><b>q</b> - Quit debugging</li>
+                <li><b>s</b> - Cycle speech speed (slow/medium/fast)</li>
             </ul>
         </div>
     </div>
@@ -325,6 +326,8 @@ class StepControlHandler(BaseHTTPRequestHandler):
             // 'c' shortcut removed to allow copy/paste
             } else if (e.key === 'q' || e.key === 'Q') {
                 sendAction('quit');
+            } else if (e.key === 's' || e.key === 'S') {
+                sendAction('speed');  // Cycle speed
             }
         });
         

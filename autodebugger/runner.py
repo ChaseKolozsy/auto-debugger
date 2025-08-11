@@ -962,6 +962,18 @@ class AutoDebugger:
                                         self._controller.update_state(mode='auto')
                                     print("\n[manual] Switched to auto mode\n", flush=True)
                                     should_step_after = True  # Continue stepping in auto
+                                elif action == 'speed':
+                                    # Cycle through speech speeds
+                                    if hasattr(self._controller, 'cycle_audio_speed'):
+                                        new_speed = self._controller.cycle_audio_speed()
+                                        if self._tts:
+                                            # Map speed to TTS rate
+                                            speed_rates = {"slow": 150, "medium": 210, "fast": 270}
+                                            self._tts.rate = speed_rates.get(new_speed, 210)
+                                            self._tts.speak(f"Speed {new_speed}")
+                                            while self._tts.is_speaking():
+                                                time.sleep(0.05)
+                                    should_step_after = False
                                     break
                                 elif action == 'continue':
                                     client.request("continue", {"threadId": thread_id})

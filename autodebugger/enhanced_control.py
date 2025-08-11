@@ -115,6 +115,7 @@ class SharedState:
             "function_body": None,
             "audio_enabled": False,  # Will be set based on --manual-audio flag
             "audio_available": False,  # Will be set if TTS is available
+            "audio_speed": "medium",  # Speech speed: slow, medium, fast
             "function_panel_open": False,  # Track if function panel is visible
             # Explore UX state for web interactions
             "explore_active": False,
@@ -189,6 +190,23 @@ class SharedState:
         """Get current audio state."""
         with self._lock:
             return self._current_state["audio_enabled"]
+    
+    def cycle_audio_speed(self) -> str:
+        """Cycle through audio speeds and return new speed."""
+        with self._lock:
+            current = self._current_state["audio_speed"]
+            if current == "slow":
+                self._current_state["audio_speed"] = "medium"
+            elif current == "medium":
+                self._current_state["audio_speed"] = "fast"
+            else:  # fast
+                self._current_state["audio_speed"] = "slow"
+            return self._current_state["audio_speed"]
+    
+    def get_audio_speed(self) -> str:
+        """Get current audio speed."""
+        with self._lock:
+            return self._current_state["audio_speed"]
 
 
 class StepControlHandler(BaseHTTPRequestHandler):
@@ -508,6 +526,7 @@ class StepControlHandler(BaseHTTPRequestHandler):
                     <li><b>q</b> - Quit debugging</li>
                     <li><b>x</b> - Toggle function context display</li>
                     <li><b>m</b> - Toggle audio mute/unmute</li>
+                    <li><b>s</b> - Cycle speech speed (slow/medium/fast)</li>
                 </ul>
             </div>
         </div>
@@ -768,6 +787,8 @@ class StepControlHandler(BaseHTTPRequestHandler):
                 toggleFunction();
             } else if (e.key === 'm' || e.key === 'M') {
                 toggleAudio();
+            } else if (e.key === 's' || e.key === 'S') {
+                sendAction('speed');  // Cycle speed
             } else if (e.key >= '0' && e.key <= '9') {
                 // Selection in explore mode
                 sendAction(e.key);
