@@ -422,6 +422,10 @@ class HttpStepController:
     def clear_actions(self):
         """Clear any pending actions."""
         self.shared_state.clear_actions()
+    
+    def cycle_audio_speed(self) -> str:
+        """Cycle through audio speeds and return new speed."""
+        return self.shared_state.cycle_audio_speed()
 
 
 def prompt_for_action(timeout: Optional[float] = None) -> Optional[str]:

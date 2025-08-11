@@ -908,6 +908,10 @@ class HttpStepController:
     def set_audio_state(self, enabled: bool, available: bool = True):
         """Set audio state."""
         self.shared_state.update_state(audio_enabled=enabled, audio_available=available)
+    
+    def cycle_audio_speed(self) -> str:
+        """Cycle through audio speeds and return new speed."""
+        return self.shared_state.cycle_audio_speed()
 
 
 def prompt_for_action(timeout: Optional[float] = None) -> Optional[str]:

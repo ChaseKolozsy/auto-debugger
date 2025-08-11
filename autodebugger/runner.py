@@ -976,7 +976,7 @@ class AutoDebugger:
                                         if self._tts:
                                             # Map speed to TTS rate
                                             speed_rates = {"slow": 150, "medium": 210, "fast": 270}
-                                            self._tts.rate = speed_rates.get(new_speed, 210)
+                                            self._tts.rate_wpm = speed_rates.get(new_speed, 210)
                                             self._tts.speak(f"Speed {new_speed}")
                                             while self._tts.is_speaking():
                                                 time.sleep(0.05)
@@ -1180,7 +1180,7 @@ class AutoDebugger:
                                                     new_speed = self._controller.cycle_audio_speed()
                                                     if self._tts:
                                                         speed_rates = {"slow": 150, "medium": 210, "fast": 270}
-                                                        self._tts.rate = speed_rates.get(new_speed, 210)
+                                                        self._tts.rate_wpm = speed_rates.get(new_speed, 210)
                                                         self._tts.speak(f"Speed {new_speed}")
                                                         while self._tts.is_speaking():
                                                             time.sleep(0.05)
@@ -1313,7 +1313,7 @@ class AutoDebugger:
                                                     new_speed = self._controller.cycle_audio_speed()
                                                     if self._tts:
                                                         speed_rates = {"slow": 150, "medium": 210, "fast": 270}
-                                                        self._tts.rate = speed_rates.get(new_speed, 210)
+                                                        self._tts.rate_wpm = speed_rates.get(new_speed, 210)
                                                         self._tts.speak(f"Speed {new_speed}")
                                                         while self._tts.is_speaking():
                                                             time.sleep(0.05)
