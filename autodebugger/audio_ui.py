@@ -32,21 +32,42 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from .db import DEFAULT_DB_PATH, LineReportStore
 from .nested_explorer import NestedValueExplorer, format_nested_value_summary
+from .syntax_to_speech import syntax_to_speech_code, syntax_to_speech_value
 
 
 class MacSayTTS:
-    def __init__(self, voice: Optional[str] = None, rate_wpm: int = 210, verbose: bool = False) -> None:
+    def __init__(self, voice: Optional[str] = None, rate_wpm: int = 210, verbose: bool = False, convert_syntax: bool = True) -> None:
         self.voice = voice  # None means use system default voice
         self.rate_wpm = rate_wpm
         self._proc: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
         self.verbose = verbose
+        self.convert_syntax = convert_syntax  # Whether to convert syntax to speech
 
     def is_speaking(self) -> bool:
         with self._lock:
             return bool(self._proc and self._proc.poll() is None)
 
-    def speak(self, text: str, interrupt: bool = False) -> None:
+    def _convert_text_for_speech(self, text: str, is_code: bool = False) -> str:
+        """Convert text for better speech output, handling syntax if enabled."""
+        if not self.convert_syntax or not text:
+            return text
+        
+        # Determine if this looks like code or a value
+        if is_code or any(keyword in text for keyword in ["def ", "if ", "for ", "while ", "class ", "import ", "return "]):
+            return syntax_to_speech_code(text)
+        elif any(char in text for char in ["[", "]", "{", "}", "(", ")"]):
+            # Check if it's likely a value representation
+            if text.strip().startswith(("Line ", "Scope:", "Changes:", "Function:", "Error:")):
+                # This is a prefixed message, only convert the value part
+                parts = text.split(":", 1)
+                if len(parts) == 2:
+                    prefix, value = parts
+                    return f"{prefix}: {syntax_to_speech_value(value.strip())}"
+            return syntax_to_speech_value(text)
+        return text
+
+    def speak(self, text: str, interrupt: bool = False, is_code: bool = False) -> None:
         if not text:
             return
         proc_to_stop = None
@@ -74,21 +95,31 @@ class MacSayTTS:
                 except Exception:
                     pass
             try:
+                # Convert text for speech if needed
+                converted_text = self._convert_text_for_speech(text, is_code)
+                
                 args = ["say"]
                 if self.voice:
                     args += ["-v", self.voice]
-                args += ["-r", str(self.rate_wpm), text]
+                args += ["-r", str(self.rate_wpm), converted_text]
                 self._proc = subprocess.Popen(
                     args,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
             except FileNotFoundError:
-                print(f"[TTS] {text}")
+                converted_text = self._convert_text_for_speech(text, is_code)
+                print(f"[TTS] {converted_text}")
                 self._proc = None
             finally:
                 if self.verbose:
-                    print(f"[speak] {text}")
+                    # Show both original and converted for debugging
+                    converted_text = self._convert_text_for_speech(text, is_code)
+                    if converted_text != text:
+                        print(f"[speak-original] {text}")
+                        print(f"[speak-converted] {converted_text}")
+                    else:
+                        print(f"[speak] {text}")
 
     def stop(self) -> None:
         with self._lock:
@@ -457,7 +488,7 @@ def autoplay_session(
             text = prefix + code.strip()
         else:
             text = prefix + "no code captured"
-        tts.speak(text, interrupt=True)
+        tts.speak(text, interrupt=True, is_code=True)
 
         # Wait for speech to finish
         while tts.is_speaking():
@@ -560,7 +591,7 @@ def autoplay_session(
                             time.sleep(0.05)
                     continue
                 if low in ("repeat", "r"):
-                    tts.speak(text, interrupt=True)
+                    tts.speak(text, interrupt=True, is_code=True)
                     while tts.is_speaking():
                         time.sleep(0.05)
                     continue

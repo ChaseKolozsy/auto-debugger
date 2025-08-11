@@ -71,6 +71,7 @@ class NestedValueExplorer:
         if isinstance(value, str) and len(value) > 50:
             self.tts.speak(f"{name} is string of length {len(value)}: {value[:50]}...")
         else:
+            # The value representation might have brackets/braces, so it will be converted by TTS
             self.tts.speak(f"{name} is {value_type}: {value}")
             
     def _explore_sequence(self, name: str, sequence: Union[List, Tuple], seq_type: str, depth: int) -> None:

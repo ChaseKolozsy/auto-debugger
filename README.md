@@ -24,6 +24,10 @@ Manual stepping mode
   - Announces current line and code via macOS text-to-speech
   - Speaks variable values and changes at each step
   - Configurable voice and speech rate
+  - **Syntax-to-speech conversion**: Automatically converts brackets, braces, and parentheses to natural language
+    - `[1, 2]` becomes "list open bracket 1, 2 close bracket"
+    - `{'key': 'value'}` becomes "dictionary open brace 'key': 'value' close brace"
+    - `foo()` becomes "foo open paren close paren"
 - Combined features: `autodebug run --manual --manual-web --manual-audio --manual-from path/to/file.py:50 path/to/script.py`
   - Use all features together for maximum control and accessibility
   - **Known Issue**: Web interface may hang when using --manual-from with --manual-audio together. See [issue #1](https://github.com/ChaseKolozsy/auto-debugger/issues/1). Workaround: use --manual-from without audio, or start in manual mode from the beginning if audio is needed.

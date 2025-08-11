@@ -28,6 +28,7 @@ from .dap_client import DapClient
 from .db import LineReport, LineReportStore, SessionSummary
 from .audio_ui import MacSayTTS, summarize_delta
 from .nested_explorer import NestedValueExplorer
+from .syntax_to_speech import syntax_to_speech_code
 
 
 def utc_now_iso() -> str:
@@ -610,7 +611,8 @@ class AutoDebugger:
                                     announcement = f"Line {line}: {code}"
                                 
                                 # Speak with interrupt to clear any previous speech
-                                self._tts.speak(announcement, interrupt=True)
+                                # Mark as code since it contains code snippets
+                                self._tts.speak(announcement, interrupt=True, is_code=True)
                                 
                                 # Summarize scope
                                 def _scope_brief(variables: Dict[str, Any], max_pairs: int = 10) -> str:
