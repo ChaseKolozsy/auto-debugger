@@ -102,28 +102,103 @@ class AutoDebugger:
         if not isinstance(value_str, str):
             return value_str
             
+        # Check if the string contains ellipsis markers like [...] or {...}
+        # These indicate truncated data that needs to be fetched from debugpy
+        if '[...]' in value_str or '{...}' in value_str:
+            # Return a marker that this needs to be fetched via DAP
+            return {"_needs_fetch": True, "_preview": value_str}
+            
         # Try to parse as JSON first (handles lists, dicts, numbers, bools, null)
         try:
             import json
-            return json.loads(value_str)
+            parsed = json.loads(value_str)
+            # Check if parsed result contains ellipsis
+            if self._contains_ellipsis(parsed):
+                return {"_needs_fetch": True, "_preview": value_str}
+            return parsed
         except (json.JSONDecodeError, ValueError):
             pass
         
         # Try to evaluate as Python literal (handles tuples, sets, more complex dicts)
         try:
             import ast
-            return ast.literal_eval(value_str)
+            parsed = ast.literal_eval(value_str)
+            # Check if parsed result contains ellipsis
+            if self._contains_ellipsis(parsed):
+                return {"_needs_fetch": True, "_preview": value_str}
+            return parsed
         except (ValueError, SyntaxError):
             pass
         
         # Return original string if parsing fails
         return value_str
     
+    def _contains_ellipsis(self, obj: Any) -> bool:
+        """Check if an object contains ellipsis (truncated data marker)."""
+        if obj is Ellipsis:
+            return True
+        if isinstance(obj, (list, tuple)):
+            return any(self._contains_ellipsis(item) for item in obj)
+        if isinstance(obj, dict):
+            return any(self._contains_ellipsis(v) for v in obj.values())
+        return False
+    
+    def _fetch_complete_value(self, var_ref: int, max_depth: int = 5) -> Any:
+        """Fetch complete value from debugpy using variable reference.
+        
+        Recursively fetches all data until no ellipses remain.
+        """
+        if not self.client or var_ref <= 0 or max_depth <= 0:
+            return None
+            
+        try:
+            # Fetch variables for this reference
+            response = self.client.request("variables", {"variablesReference": var_ref})
+            if not response or not response.body:
+                return None
+                
+            variables = response.body.get("variables", [])
+            
+            # Build the complete structure
+            result = {}
+            for var in variables:
+                name = var.get("name", "")
+                value_str = var.get("value", "")
+                child_ref = var.get("variablesReference", 0)
+                
+                # Skip special attributes
+                if name.startswith("__") and name.endswith("__"):
+                    continue
+                    
+                # If this has children, fetch them recursively
+                if child_ref > 0:
+                    child_value = self._fetch_complete_value(child_ref, max_depth - 1)
+                    if child_value is not None:
+                        result[name] = child_value
+                    else:
+                        # Couldn't fetch children, use the string representation
+                        result[name] = self._parse_string_to_object(value_str)
+                else:
+                    # No children, parse the value
+                    result[name] = self._parse_string_to_object(value_str)
+            
+            # Try to determine if this should be a list or dict
+            if all(k.isdigit() for k in result.keys()):
+                # All keys are numbers, this is likely a list
+                return [result[str(i)] for i in range(len(result)) if str(i) in result]
+            else:
+                return result
+                
+        except Exception as e:
+            print(f"[Debug] Failed to fetch complete value for ref {var_ref}: {e}")
+            return None
+    
     def _extract_display_values(self, vars_dict: Dict[str, Any]) -> Dict[str, Any]:
         """Extract displayable values from structured variable format.
         
         Converts {"value": ..., "ref": ..., "children": ...} format to clean, display-friendly format.
         Parses string representations back to actual Python objects for clean display.
+        Fetches complete data from debugpy when ellipsis is encountered.
         """
         result = {}
         for scope_name, scope_vars in vars_dict.items():
@@ -140,8 +215,22 @@ class AutoDebugger:
                         value_str = var_info["value"]
                         parsed_value = self._parse_string_to_object(value_str)
                         
+                        # Check if we need to fetch complete data
+                        if isinstance(parsed_value, dict) and parsed_value.get("_needs_fetch"):
+                            # We have truncated data, fetch the complete value
+                            var_ref = var_info.get("ref", 0)
+                            if var_ref > 0 and self.client:
+                                complete_value = self._fetch_complete_value(var_ref)
+                                if complete_value is not None:
+                                    parsed_value = complete_value
+                                else:
+                                    # Couldn't fetch, use preview but clean it up
+                                    preview = parsed_value.get("_preview", value_str)
+                                    # Remove ellipsis markers for display
+                                    preview = preview.replace('[...]', '[…]').replace('{...}', '{…}')
+                                    parsed_value = preview
+                        
                         # For the display, just show the clean parsed value
-                        # No need to show the complex DAP structure
                         scope_result[var_name] = parsed_value
                     else:
                         # Fallback to the whole object if no value field
@@ -150,7 +239,12 @@ class AutoDebugger:
                     # Handle simple values (backward compatibility)
                     # Try to parse if it's a string representation
                     if isinstance(var_info, str):
-                        scope_result[var_name] = self._parse_string_to_object(var_info)
+                        parsed = self._parse_string_to_object(var_info)
+                        # Handle needs_fetch case
+                        if isinstance(parsed, dict) and parsed.get("_needs_fetch"):
+                            scope_result[var_name] = parsed.get("_preview", var_info)
+                        else:
+                            scope_result[var_name] = parsed
                     else:
                         scope_result[var_name] = var_info
             result[scope_name] = scope_result
@@ -929,7 +1023,22 @@ class AutoDebugger:
                                                     # Extract the string value and try to parse it
                                                     value_str = var_info["value"]
                                                     parsed_value = self._parse_string_to_object(value_str)
-                                                    print(f"[Debug] Variable '{var_name}': '{value_str}' -> {type(parsed_value).__name__}")
+                                                    
+                                                    # Check if we need to fetch complete data
+                                                    if isinstance(parsed_value, dict) and parsed_value.get("_needs_fetch"):
+                                                        # We have truncated data, fetch the complete value
+                                                        var_ref = var_info.get("ref", 0)
+                                                        if var_ref > 0 and self.client:
+                                                            print(f"[Debug] Fetching complete data for '{var_name}' (ref={var_ref})")
+                                                            complete_value = self._fetch_complete_value(var_ref)
+                                                            if complete_value is not None:
+                                                                parsed_value = complete_value
+                                                                print(f"[Debug] Fetched complete value for '{var_name}': {type(complete_value).__name__}")
+                                                            else:
+                                                                # Couldn't fetch, use preview
+                                                                parsed_value = parsed_value.get("_preview", value_str)
+                                                    
+                                                    print(f"[Debug] Variable '{var_name}': {type(parsed_value).__name__}")
                                                     # Store both the parsed value and the reference if available
                                                     if "ref" in var_info or "children" in var_info:
                                                         # Keep the structured info for lazy loading
@@ -1073,11 +1182,26 @@ class AutoDebugger:
                                             if isinstance(var_info, dict) and "value" in var_info:
                                                 # Extract the string value and try to parse it
                                                 value_str = var_info["value"]
-                                                value = self._parse_string_to_object(value_str)
+                                                parsed_value = self._parse_string_to_object(value_str)
+                                                
+                                                # Check if we need to fetch complete data
+                                                if isinstance(parsed_value, dict) and parsed_value.get("_needs_fetch"):
+                                                    # We have truncated data, fetch the complete value
+                                                    var_ref = var_info.get("ref", 0)
+                                                    if var_ref > 0 and self.client:
+                                                        complete_value = self._fetch_complete_value(var_ref)
+                                                        if complete_value is not None:
+                                                            parsed_value = complete_value
+                                                        else:
+                                                            # Couldn't fetch, use preview
+                                                            parsed_value = parsed_value.get("_preview", value_str)
+                                                
                                                 # Store both the parsed value and the reference if available
                                                 if "ref" in var_info or "children" in var_info:
                                                     # Keep the structured info for lazy loading
-                                                    value = {"_parsed": value, "_ref": var_info.get("ref"), "_children": var_info.get("children")}
+                                                    value = {"_parsed": parsed_value, "_ref": var_info.get("ref"), "_children": var_info.get("children")}
+                                                else:
+                                                    value = parsed_value
                                             else:
                                                 value = self._parse_string_to_object(var_info) if isinstance(var_info, str) else var_info
                                             all_vars.append((scope_name, var_name, value))
