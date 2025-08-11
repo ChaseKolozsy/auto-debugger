@@ -681,91 +681,100 @@ class AutoDebugger:
                                         while self._tts.is_speaking():
                                             time.sleep(0.05)
                             
-                            # Wait for user action
-                            action = None
-                            if self._controller:
-                                # Web interface
-                                while action is None:
-                                    action = self._controller.wait_for_action(0.5)
-                                    if self._abort_requested:
-                                        action = 'quit'
-                                        break
-                            else:
-                                # Terminal interface
-                                action = prompt_for_action()
-                            
-                            # Update controller state
-                            if self._controller:
-                                self._controller.update_state(waiting=False)
-                            
-                            # Process action
-                            # Clear the just_activated_manual flag since we've now received user input
-                            just_activated_manual = False
-                            
-                            if action == 'quit':
-                                try:
-                                    client.request("disconnect", {"terminateDebuggee": True}, wait=2.0)
-                                except Exception:
-                                    pass
-                                running = False
-                                should_step_after = False
-                                break
-                            elif action == 'auto':
-                                manual_mode_active = False
+                            # Loop while at this stopped event to allow multiple actions
+                            while True:
+                                # Wait for user action
+                                action = None
                                 if self._controller:
-                                    self._controller.update_state(mode='auto')
-                                print("\n[manual] Switched to auto mode\n", flush=True)
-                                should_step_after = True  # Continue stepping in auto
-                            elif action == 'continue':
-                                client.request("continue", {"threadId": thread_id})
-                                should_step_after = False  # Don't step, we already continued
-                                continue
-                            elif action == 'variables':
-                                # Read ALL current variables on demand
-                                if self._tts and vars_payload:
-                                    # Find the main scope (usually Locals)
-                                    read_any = False
-                                    for scope_name in ("Locals", "locals", "Local", "Globals", "globals"):
-                                        if scope_name in vars_payload:
-                                            scope_vars = vars_payload[scope_name]
-                                            if isinstance(scope_vars, dict) and scope_vars:
-                                                self._tts.speak(f"Variables in {scope_name}")
-                                                while self._tts.is_speaking():
-                                                    time.sleep(0.05)
-                                                
-                                                # Read each variable
-                                                for var_name, var_info in scope_vars.items():
-                                                    if isinstance(var_info, dict) and "value" in var_info:
-                                                        value = var_info["value"]
-                                                    else:
-                                                        value = var_info
-                                                    
-                                                    # Format value for speech
-                                                    value_str = str(value)
-                                                    if len(value_str) > 100:
-                                                        value_str = value_str[:100] + "..."
-                                                    
-                                                    self._tts.speak(f"{var_name} is {value_str}")
+                                    # Indicate waiting in UI
+                                    self._controller.update_state(waiting=True)
+                                    while action is None:
+                                        action = self._controller.wait_for_action(0.5)
+                                        if self._abort_requested:
+                                            action = 'quit'
+                                            break
+                                else:
+                                    # Terminal interface
+                                    action = prompt_for_action()
+                                
+                                # Update controller state
+                                if self._controller:
+                                    self._controller.update_state(waiting=False)
+                                
+                                # Process action
+                                # Clear the just_activated_manual flag since we've now received user input
+                                just_activated_manual = False
+                                
+                                if action == 'quit':
+                                    try:
+                                        client.request("disconnect", {"terminateDebuggee": True}, wait=2.0)
+                                    except Exception:
+                                        pass
+                                    running = False
+                                    should_step_after = False
+                                    break
+                                elif action == 'auto':
+                                    manual_mode_active = False
+                                    if self._controller:
+                                        self._controller.update_state(mode='auto')
+                                    print("\n[manual] Switched to auto mode\n", flush=True)
+                                    should_step_after = True  # Continue stepping in auto
+                                    break
+                                elif action == 'continue':
+                                    client.request("continue", {"threadId": thread_id})
+                                    should_step_after = False  # Don't step, we already continued
+                                    # Exit action loop; do not stepIn since we continued
+                                    break
+                                elif action == 'step':
+                                    # Step to next line explicitly
+                                    should_step_after = True
+                                    break
+                                elif action == 'variables':
+                                    # Read ALL current variables on demand
+                                    if self._tts and vars_payload:
+                                        # Find the main scope (usually Locals)
+                                        read_any = False
+                                        for scope_name in ("Locals", "locals", "Local", "Globals", "globals"):
+                                            if scope_name in vars_payload:
+                                                scope_vars = vars_payload[scope_name]
+                                                if isinstance(scope_vars, dict) and scope_vars:
+                                                    self._tts.speak(f"Variables in {scope_name}")
                                                     while self._tts.is_speaking():
                                                         time.sleep(0.05)
-                                                
-                                                read_any = True
-                                                break  # Usually we only need Locals
-                                    
-                                    if not read_any:
-                                        self._tts.speak("No variables in scope")
+                                                    
+                                                    # Read each variable
+                                                    for var_name, var_info in scope_vars.items():
+                                                        if isinstance(var_info, dict) and "value" in var_info:
+                                                            value = var_info["value"]
+                                                        else:
+                                                            value = var_info
+                                                        
+                                                        # Format value for speech
+                                                        value_str = str(value)
+                                                        if len(value_str) > 100:
+                                                            value_str = value_str[:100] + "..."
+                                                        
+                                                        self._tts.speak(f"{var_name} is {value_str}")
+                                                        while self._tts.is_speaking():
+                                                            time.sleep(0.05)
+                                                    
+                                                    read_any = True
+                                                    break  # Usually we only need Locals
+                                        
+                                        if not read_any:
+                                            self._tts.speak("No variables in scope")
+                                            while self._tts.is_speaking():
+                                                time.sleep(0.05)
+                                    else:
+                                        self._tts.speak("No variables available")
                                         while self._tts.is_speaking():
                                             time.sleep(0.05)
-                                else:
-                                    self._tts.speak("No variables available")
-                                    while self._tts.is_speaking():
-                                        time.sleep(0.05)
-                                
-                                should_step_after = False
-                                continue
-                            elif action == 'function':
-                                # Read function context on demand
-                                if self._tts:
+                                    # After speaking variables, re-prompt for another action
+                                    should_step_after = False
+                                    continue
+                                elif action == 'function':
+                                    # Read function context on demand
+                                    if self._tts:
                                     # Try to get function name from frame info
                                     func_name = None
                                     if file and line:
@@ -804,21 +813,21 @@ class AutoDebugger:
                                         self._tts.speak("Not currently in a function")
                                         while self._tts.is_speaking():
                                             time.sleep(0.05)
-                                
-                                should_step_after = False
-                                continue
-                            elif action == 'explore':
-                                # Interactive exploration with numbered selection
-                                # Compute changed variables by scope for UI and selection
-                                changed_vars: List[Tuple[str, str, Any]] = []  # (scope, var_name, value)
-                                for scope_name in ("Locals", "locals", "Local", "Globals", "globals"):
-                                    scope_delta = variables_delta.get(scope_name)
-                                    if isinstance(scope_delta, dict):
-                                        scope_vars = vars_payload.get(scope_name, {}) if isinstance(vars_payload.get(scope_name), dict) else {}
-                                        for var_name in scope_delta.keys():
-                                            var_info = scope_vars.get(var_name)
-                                            value = var_info["value"] if isinstance(var_info, dict) and "value" in var_info else var_info
-                                            changed_vars.append((scope_name, var_name, value))
+                                        # After speaking function context, re-prompt for another action
+                                        should_step_after = False
+                                        continue
+                                elif action == 'explore':
+                                    # Interactive exploration with numbered selection
+                                    # Compute changed variables by scope for UI and selection
+                                    changed_vars: List[Tuple[str, str, Any]] = []  # (scope, var_name, value)
+                                    for scope_name in ("Locals", "locals", "Local", "Globals", "globals"):
+                                        scope_delta = variables_delta.get(scope_name)
+                                        if isinstance(scope_delta, dict):
+                                            scope_vars = vars_payload.get(scope_name, {}) if isinstance(vars_payload.get(scope_name), dict) else {}
+                                            for var_name in scope_delta.keys():
+                                                var_info = scope_vars.get(var_name)
+                                                value = var_info["value"] if isinstance(var_info, dict) and "value" in var_info else var_info
+                                                changed_vars.append((scope_name, var_name, value))
 
                                 if changed_vars:
                                     page = 0
@@ -933,13 +942,12 @@ class AutoDebugger:
                                         self._tts.speak("No changes to explore")
                                         while self._tts.is_speaking():
                                             time.sleep(0.05)
-                                
-                                should_step_after = False  # Don't auto-step after exploring
-                                # Re-prompt for next action
-                                continue
-                            elif action == 'step':
-                                should_step_after = True  # Explicitly handle step action
-                            # Default: step (should_step_after remains True)
+                                    # Don't auto-step after exploring; re-prompt for next action
+                                    should_step_after = False
+                                    continue
+                                else:
+                                    # Unknown action: ignore and re-prompt
+                                    continue
                         else:
                             # Not in manual mode - continue stepping automatically
                             pass
