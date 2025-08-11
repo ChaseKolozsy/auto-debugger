@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
 from .db import DEFAULT_DB_PATH, LineReportStore
+from .nested_explorer import NestedValueExplorer, format_nested_value_summary
 
 
 class MacSayTTS:
@@ -425,10 +426,14 @@ def autoplay_session(
     speak_scope: bool = True,
     recite_function: str = "off",  # "off" | "sig" | "full"
     db_path: Optional[str] = None,
+    explore_nested: bool = True,  # Enable interactive nested exploration
 ) -> None:
     tts.speak(f"Playing session {session.script_name}")
     while tts.is_speaking():
         time.sleep(0.05)
+
+    # Initialize nested explorer if enabled
+    explorer = NestedValueExplorer(tts, verbose=tts.verbose) if explore_nested else None
 
     any_lines = False
     # Prepare function/source helpers once per session
@@ -507,7 +512,7 @@ def autoplay_session(
         if mode == "manual":
             # Block until user submits 'next', saving any other entered text as notes
             while True:
-                cmd_or_note = _prompt("Note or 'next' (commands: func|sig|full|body|repeat|scope|changes, q quit): ").strip()
+                cmd_or_note = _prompt("Note or 'next' (commands: func|sig|full|body|repeat|scope|changes|explore, q quit): ").strip()
                 low = cmd_or_note.lower()
                 if low in ("next", "n"):
                     break
@@ -573,6 +578,57 @@ def autoplay_session(
                     while tts.is_speaking():
                         time.sleep(0.05)
                     continue
+                if low == "explore" and explorer:
+                    # Interactive exploration of variables
+                    vars_obj = rec.get("variables") or {}
+                    if vars_obj:
+                        tts.speak("Which variable to explore? Available scopes:")
+                        while tts.is_speaking():
+                            time.sleep(0.05)
+                        
+                        # List available scopes
+                        scopes = list(vars_obj.keys())
+                        for scope_name in scopes:
+                            tts.speak(scope_name)
+                            while tts.is_speaking():
+                                time.sleep(0.05)
+                        
+                        # Let user pick a scope
+                        scope_choice = _prompt("Enter scope name (e.g., Locals): ").strip()
+                        if scope_choice in vars_obj:
+                            scope_vars = vars_obj[scope_choice]
+                            if isinstance(scope_vars, dict):
+                                # List variables in scope
+                                var_names = list(scope_vars.keys())
+                                tts.speak(f"Variables in {scope_choice}: {', '.join(var_names[:10])}")
+                                while tts.is_speaking():
+                                    time.sleep(0.05)
+                                
+                                # Let user pick a variable
+                                var_choice = _prompt("Enter variable name to explore: ").strip()
+                                if var_choice in scope_vars:
+                                    var_data = scope_vars[var_choice]
+                                    # Extract the actual value
+                                    if isinstance(var_data, dict) and "value" in var_data:
+                                        value = var_data["value"]
+                                    else:
+                                        value = var_data
+                                    
+                                    # Start interactive exploration
+                                    explorer.explore_value(var_choice, value)
+                                else:
+                                    tts.speak(f"Variable {var_choice} not found")
+                                    while tts.is_speaking():
+                                        time.sleep(0.05)
+                        else:
+                            tts.speak(f"Scope {scope_choice} not found")
+                            while tts.is_speaking():
+                                time.sleep(0.05)
+                    else:
+                        tts.speak("No variables available")
+                        while tts.is_speaking():
+                            time.sleep(0.05)
+                    continue
                 if cmd_or_note:
                     try:
                         _update_observations(conn, line_id, cmd_or_note)
@@ -603,6 +659,7 @@ def run_audio_interface(
     mode: str = "manual",
     speak_scope: bool = True,
     recite_function: str = "off",
+    explore_nested: bool = True,
 ) -> int:
     tts = MacSayTTS(voice=voice, rate_wpm=rate_wpm, verbose=verbose)
 
@@ -635,6 +692,8 @@ def run_audio_interface(
             mode=mode,
             speak_scope=speak_scope,
             recite_function=recite_function,
+            db_path=db_path,
+            explore_nested=explore_nested,
         )
 
     tts.stop()

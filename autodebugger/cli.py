@@ -101,7 +101,8 @@ def ui_cmd(db_path: Optional[str], host: str, port: int, open_browser: bool) -> 
 @click.option("--mode", type=click.Choice(["auto", "manual"], case_sensitive=False), default="manual", show_default=True, help="Playback mode")
 @click.option("--recite-func", type=click.Choice(["off", "sig", "full"], case_sensitive=False), default="off", show_default=True, help="Recite function signature/body for each line")
 @click.option("--no-scope", is_flag=True, default=False, help="Do not speak scope summary for each line")
-def audio_cmd(db_path: Optional[str], voice: Optional[str], rate: int, delay: float, verbose: bool, mode: str, recite_func: str, no_scope: bool) -> None:
+@click.option("--no-explore", is_flag=True, default=False, help="Disable interactive nested value exploration")
+def audio_cmd(db_path: Optional[str], voice: Optional[str], rate: int, delay: float, verbose: bool, mode: str, recite_func: str, no_scope: bool, no_explore: bool) -> None:
     """macOS audio interface for reviewing sessions (TTS + optional voice commands)."""
     code = run_audio_interface(
         db_path=db_path,
@@ -112,6 +113,7 @@ def audio_cmd(db_path: Optional[str], voice: Optional[str], rate: int, delay: fl
         mode=mode.lower(),
         recite_function=recite_func.lower(),
         speak_scope=(not no_scope),
+        explore_nested=(not no_explore),
     )
     # propagate exit code
     sys.exit(code)

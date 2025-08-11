@@ -30,12 +30,18 @@ Manual stepping mode
 
 Audio review (macOS)
 - Review sessions with audio + typing: `autodebug audio --db .autodebug/line_reports.db`
-- Options: `--voice <name>` (omit to use system default), `--rate 210`, `--delay 0.4`, `--verbose`, `--mode {manual,auto}`, `--recite-func {off,sig,full}`, `--no-scope`
+- Options: `--voice <name>` (omit to use system default), `--rate 210`, `--delay 0.4`, `--verbose`, `--mode {manual,auto}`, `--recite-func {off,sig,full}`, `--no-scope`, `--no-explore`
 - Session selection (paged 0–9): type a digit 0–9 and Enter to select; type `okay` for 0; `next` for next page.
 - During playback: it reads each executed line and variable changes. Type notes and press Enter to save them as observations for the current line. Type `next` (or `n`) and Enter to advance; `q` quits.
   - Auto mode: pass `--mode auto` to advance automatically with a small pacing delay.
   - Scope summary: disable with `--no-scope`.
   - Function context: add `--recite-func sig` (signature) or `--recite-func full` (signature then body) to hear the containing function.
+  - **Interactive nested exploration** (NEW - fixes [issue #2](https://github.com/ChaseKolozsy/auto-debugger/issues/2)): Type `explore` during playback to interactively explore nested data structures:
+    - Select a scope and variable to explore
+    - Press 'y' to dive deeper into nested structures (lists, dicts, tuples, objects)
+    - Press 'n' to skip to the next item
+    - Gracefully handles all Python data types with intelligent depth limits
+    - Disable with `--no-explore` if not needed
 
 MCP server (agents)
 - A minimal MCP server is included to let agents query the SQLite DB precisely (sessions, lines, crashes, function context) without loading the full DB.

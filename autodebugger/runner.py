@@ -27,6 +27,7 @@ else:
 from .dap_client import DapClient
 from .db import LineReport, LineReportStore, SessionSummary
 from .audio_ui import MacSayTTS, summarize_delta
+from .nested_explorer import NestedValueExplorer
 
 
 def utc_now_iso() -> str:
@@ -44,6 +45,7 @@ class AutoDebugger:
         self.client: Optional[DapClient] = None
         self._controller: Optional[HttpStepController] = None
         self._tts: Optional[MacSayTTS] = None
+        self._nested_explorer: Optional[NestedValueExplorer] = None
         self._abort_requested: bool = False
 
     def _find_free_port(self) -> int:
@@ -121,6 +123,8 @@ class AutoDebugger:
         # Initialize TTS first if audio is enabled
         if manual_audio:
             self._tts = MacSayTTS(voice=manual_voice, rate_wpm=manual_rate_wpm, verbose=False)
+            # Initialize nested explorer for interactive variable exploration
+            self._nested_explorer = NestedValueExplorer(self._tts, verbose=False)
         
         if manual_web:
             # Pass TTS instance to controller if available
