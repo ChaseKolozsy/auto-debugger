@@ -394,7 +394,7 @@ class HttpStepController:
 
 def prompt_for_action(timeout: Optional[float] = None) -> Optional[str]:
     """Prompt user for manual stepping action via stdin."""
-    print("\n[manual] Press Enter to step, 'a' for auto, 'c' to continue, 'q' to quit: ", end='', flush=True)
+    print("\n[manual] Enter=step, v=vars, f=function, e=explore, a=auto, c=continue, q=quit: ", end='', flush=True)
     
     if timeout is not None:
         # Use select for timeout on Unix-like systems
@@ -410,6 +410,12 @@ def prompt_for_action(timeout: Optional[float] = None) -> Optional[str]:
         response = input().strip().lower()
         if response == '' or response == 'step':
             return 'step'
+        elif response in ['v', 'vars', 'variables']:
+            return 'variables'
+        elif response in ['f', 'func', 'function']:
+            return 'function'
+        elif response in ['e', 'explore']:
+            return 'explore'
         elif response in ['a', 'auto']:
             return 'auto'
         elif response in ['c', 'continue']:

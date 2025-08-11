@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import select
 import shlex
 import socket
@@ -614,6 +615,10 @@ class AutoDebugger:
                                 # Mark as code since it contains code snippets
                                 self._tts.speak(announcement, interrupt=True, is_code=True)
                                 
+                                # Wait for main announcement to finish before scope
+                                while self._tts.is_speaking():
+                                    time.sleep(0.05)
+                                
                                 # Summarize scope
                                 def _scope_brief(variables: Dict[str, Any], max_pairs: int = 10) -> str:
                                     try:
@@ -643,15 +648,24 @@ class AutoDebugger:
                                         pass
                                     return ""
                                 
-                                scope_summary = _scope_brief(vars_payload)
-                                if scope_summary:
-                                    self._tts.speak(scope_summary)
+                                # Don't automatically read variables - only changes
+                                # Variables can be read on demand with 'v' key
                                 
                                 # Announce changes
                                 if variables_delta:
                                     delta_summary = summarize_delta(variables_delta)
                                     if delta_summary and delta_summary != "no changes":
                                         self._tts.speak(f"Changes: {delta_summary}")
+                                        # Wait for changes announcement to finish
+                                        while self._tts.is_speaking():
+                                            time.sleep(0.05)
+                                        
+                                        # Always offer to explore when there are changes
+                                        if self._nested_explorer and variables_delta:
+                                            # Prompt to explore the changed values
+                                            self._tts.speak("Press E to explore changed values interactively")
+                                            while self._tts.is_speaking():
+                                                time.sleep(0.05)
                             
                             # Wait for user action
                             action = None
@@ -691,6 +705,123 @@ class AutoDebugger:
                             elif action == 'continue':
                                 client.request("continue", {"threadId": thread_id})
                                 should_step_after = False  # Don't step, we already continued
+                                continue
+                            elif action == 'variables':
+                                # Read current variables on demand
+                                if self._tts and vars_payload:
+                                    scope_summary = _scope_brief(vars_payload)
+                                    if scope_summary:
+                                        self._tts.speak(f"Current variables: {scope_summary}")
+                                        while self._tts.is_speaking():
+                                            time.sleep(0.05)
+                                    else:
+                                        self._tts.speak("No variables in scope")
+                                        while self._tts.is_speaking():
+                                            time.sleep(0.05)
+                                
+                                should_step_after = False
+                                continue
+                            elif action == 'function':
+                                # Read function context on demand
+                                if self._tts:
+                                    # Try to get function name from frame info
+                                    func_name = None
+                                    if file and line:
+                                        # Simple heuristic - read function from file
+                                        try:
+                                            with open(file, 'r') as f:
+                                                lines = f.readlines()
+                                                # Look backwards for def
+                                                for i in range(min(line - 1, len(lines) - 1), -1, -1):
+                                                    if lines[i].strip().startswith('def '):
+                                                        func_match = re.search(r'def\s+(\w+)', lines[i])
+                                                        if func_match:
+                                                            func_name = func_match.group(1)
+                                                            # Get full signature
+                                                            func_sig = lines[i].strip()
+                                                            # Get body (next few lines)
+                                                            func_body_lines = []
+                                                            for j in range(i + 1, min(i + 6, len(lines))):
+                                                                if lines[j].strip() and not lines[j][0].isspace():
+                                                                    break
+                                                                func_body_lines.append(lines[j].rstrip())
+                                                            func_body = '\n'.join(func_body_lines)
+                                                            
+                                                            self._tts.speak(f"In function {func_name}. Signature: {func_sig}")
+                                                            while self._tts.is_speaking():
+                                                                time.sleep(0.05)
+                                                            if func_body:
+                                                                self._tts.speak(f"Body preview: {func_body[:200]}")
+                                                                while self._tts.is_speaking():
+                                                                    time.sleep(0.05)
+                                                            break
+                                        except Exception:
+                                            pass
+                                    
+                                    if not func_name:
+                                        self._tts.speak("Not currently in a function")
+                                        while self._tts.is_speaking():
+                                            time.sleep(0.05)
+                                
+                                should_step_after = False
+                                continue
+                            elif action == 'explore':
+                                # Interactive exploration of variables
+                                if self._nested_explorer and vars_payload and variables_delta:
+                                    self._tts.speak("Starting interactive exploration of changed variables")
+                                    while self._tts.is_speaking():
+                                        time.sleep(0.05)
+                                    
+                                    # Explore each changed variable
+                                    explored_any = False
+                                    for var_name in variables_delta.keys():
+                                        # Find the variable in the scope
+                                        for scope_name in ("Locals", "locals", "Local"):
+                                            if scope_name in vars_payload:
+                                                scope_vars = vars_payload[scope_name]
+                                                if isinstance(scope_vars, dict) and var_name in scope_vars:
+                                                    var_info = scope_vars[var_name]
+                                                    if isinstance(var_info, dict) and "value" in var_info:
+                                                        value = var_info["value"]
+                                                    else:
+                                                        value = var_info
+                                                    
+                                                    # Explore this changed variable
+                                                    self._tts.speak(f"Exploring changed variable: {var_name}")
+                                                    while self._tts.is_speaking():
+                                                        time.sleep(0.05)
+                                                    
+                                                    # Use the nested explorer for ALL types
+                                                    self._nested_explorer.explore_value(var_name, value)
+                                                    explored_any = True
+                                                    
+                                                    # Ask if user wants to explore more variables
+                                                    if len(variables_delta) > 1:
+                                                        self._tts.speak("Continue exploring other changed variables? Y for yes, N to stop")
+                                                        while self._tts.is_speaking():
+                                                            time.sleep(0.05)
+                                                        
+                                                        # Get yes/no response
+                                                        print("\n[Explorer] Continue? y/n: ", end='', flush=True)
+                                                        response = input().strip().lower()
+                                                        if response not in ['y', 'yes']:
+                                                            break
+                                                    break
+                                    
+                                    if explored_any:
+                                        self._tts.speak("Exploration complete")
+                                    else:
+                                        self._tts.speak("No changed variables found to explore")
+                                    while self._tts.is_speaking():
+                                        time.sleep(0.05)
+                                else:
+                                    if self._tts:
+                                        self._tts.speak("No variables to explore")
+                                        while self._tts.is_speaking():
+                                            time.sleep(0.05)
+                                
+                                should_step_after = False  # Don't auto-step after exploring
+                                # Re-prompt for next action
                                 continue
                             elif action == 'step':
                                 should_step_after = True  # Explicitly handle step action

@@ -85,46 +85,36 @@ class NestedValueExplorer:
         self.tts.speak(f"{name} is {seq_type} with {length} items")
         self._wait_for_speech()
         
-        # Show first few items
-        items_to_show = min(self.max_items_before_prompt, length)
-        for i in range(items_to_show):
+        # Process items one at a time, asking for each
+        i = 0
+        while i < length:
             item_name = f"{name}[{i}]"
             item_value = sequence[i]
             
             # Give brief description
             if isinstance(item_value, (int, float, str, bool, type(None))):
                 self._announce_primitive(item_name, item_value, type(item_value).__name__)
+                self._wait_for_speech()
             else:
                 item_type = type(item_value).__name__
                 self.tts.speak(f"{item_name} is {item_type}")
-            
-            self._wait_for_speech()
-            
-            # Ask if user wants to explore this item deeper
-            if not isinstance(item_value, (int, float, str, bool, type(None))):
-                if self._prompt_explore_deeper(item_name):
+                self._wait_for_speech()
+                
+                # For complex items, ask what to do
+                self.tts.speak(f"{item_name} has nested values. Press Y to explore deeper, N to skip")
+                self._wait_for_speech()
+                
+                if self._get_yes_no_response():
                     self.explore_value(item_name, item_value, depth + 1)
-                    
-        # If there are more items, ask if user wants to continue
-        if length > self.max_items_before_prompt:
-            remaining = length - self.max_items_before_prompt
-            self.tts.speak(f"{remaining} more items. Continue?")
-            self._wait_for_speech()
             
-            if self._get_yes_no_response():
-                for i in range(self.max_items_before_prompt, length):
-                    item_name = f"{name}[{i}]"
-                    item_value = sequence[i]
-                    
-                    if isinstance(item_value, (int, float, str, bool, type(None))):
-                        self._announce_primitive(item_name, item_value, type(item_value).__name__)
-                    else:
-                        item_type = type(item_value).__name__
-                        self.tts.speak(f"{item_name} is {item_type}")
-                        self._wait_for_speech()
-                        
-                        if self._prompt_explore_deeper(item_name):
-                            self.explore_value(item_name, item_value, depth + 1)
+            # Ask if user wants to continue to next item
+            if i < length - 1:
+                self.tts.speak(f"Continue to next item? Y for yes, N to stop")
+                self._wait_for_speech()
+                if not self._get_yes_no_response():
+                    break
+            
+            i += 1
                             
     def _explore_dict(self, name: str, dict_value: Dict, depth: int) -> None:
         """Explore a dictionary."""
@@ -138,9 +128,10 @@ class NestedValueExplorer:
         self._wait_for_speech()
         
         keys = list(dict_value.keys())
-        keys_to_show = min(self.max_items_before_prompt, num_keys)
         
-        for i in range(keys_to_show):
+        # Process keys one at a time, asking for each
+        i = 0
+        while i < num_keys:
             key = keys[i]
             value = dict_value[key]
             item_name = f"{name}[{repr(key)}]"
@@ -148,116 +139,90 @@ class NestedValueExplorer:
             # Give brief description
             if isinstance(value, (int, float, str, bool, type(None))):
                 self._announce_primitive(item_name, value, type(value).__name__)
+                self._wait_for_speech()
             else:
                 value_type = type(value).__name__
                 self.tts.speak(f"{item_name} is {value_type}")
-            
-            self._wait_for_speech()
-            
-            # Ask if user wants to explore deeper
-            if not isinstance(value, (int, float, str, bool, type(None))):
-                if self._prompt_explore_deeper(item_name):
+                self._wait_for_speech()
+                
+                # For complex values, ask what to do
+                self.tts.speak(f"{item_name} has nested values. Press Y to explore deeper, N to skip")
+                self._wait_for_speech()
+                
+                if self._get_yes_no_response():
                     self.explore_value(item_name, value, depth + 1)
-                    
-        # If there are more keys, ask if user wants to continue
-        if num_keys > self.max_items_before_prompt:
-            remaining = num_keys - self.max_items_before_prompt
-            self.tts.speak(f"{remaining} more keys. Continue?")
-            self._wait_for_speech()
             
-            if self._get_yes_no_response():
-                for i in range(self.max_items_before_prompt, num_keys):
-                    key = keys[i]
-                    value = dict_value[key]
-                    item_name = f"{name}[{repr(key)}]"
-                    
-                    if isinstance(value, (int, float, str, bool, type(None))):
-                        self._announce_primitive(item_name, value, type(value).__name__)
-                    else:
-                        value_type = type(value).__name__
-                        self.tts.speak(f"{item_name} is {value_type}")
-                        self._wait_for_speech()
-                        
-                        if self._prompt_explore_deeper(item_name):
-                            self.explore_value(item_name, value, depth + 1)
+            # Ask if user wants to continue to next key
+            if i < num_keys - 1:
+                self.tts.speak(f"Continue to next key? Y for yes, N to stop")
+                self._wait_for_speech()
+                if not self._get_yes_no_response():
+                    break
+            
+            i += 1
                             
     def _explore_object(self, name: str, obj: Any, depth: int) -> None:
         """Explore an object with attributes."""
         obj_type = type(obj).__name__
         attrs = [attr for attr in dir(obj) if not attr.startswith('_')]
         
-        if not attrs:
+        # Filter out callable attributes
+        non_callable_attrs = []
+        for attr in attrs:
+            try:
+                value = getattr(obj, attr)
+                if not callable(value):
+                    non_callable_attrs.append(attr)
+            except Exception:
+                continue
+        
+        if not non_callable_attrs:
             self.tts.speak(f"{name} is {obj_type} with no public attributes")
             return
             
-        self.tts.speak(f"{name} is {obj_type} with {len(attrs)} attributes")
+        self.tts.speak(f"{name} is {obj_type} with {len(non_callable_attrs)} attributes")
         self._wait_for_speech()
         
-        attrs_to_show = min(self.max_items_before_prompt, len(attrs))
-        
-        for i in range(attrs_to_show):
-            attr = attrs[i]
+        # Process attributes one at a time
+        i = 0
+        while i < len(non_callable_attrs):
+            attr = non_callable_attrs[i]
             try:
                 value = getattr(obj, attr)
                 item_name = f"{name}.{attr}"
                 
-                # Skip methods
-                if callable(value):
-                    continue
-                    
                 # Give brief description
                 if isinstance(value, (int, float, str, bool, type(None))):
                     self._announce_primitive(item_name, value, type(value).__name__)
+                    self._wait_for_speech()
                 else:
                     value_type = type(value).__name__
                     self.tts.speak(f"{item_name} is {value_type}")
-                
-                self._wait_for_speech()
-                
-                # Ask if user wants to explore deeper
-                if not isinstance(value, (int, float, str, bool, type(None))):
-                    if self._prompt_explore_deeper(item_name):
+                    self._wait_for_speech()
+                    
+                    # For complex values, ask what to do
+                    self.tts.speak(f"{item_name} has nested values. Press Y to explore deeper, N to skip")
+                    self._wait_for_speech()
+                    
+                    if self._get_yes_no_response():
                         self.explore_value(item_name, value, depth + 1)
+                
+                # Ask if user wants to continue to next attribute
+                if i < len(non_callable_attrs) - 1:
+                    self.tts.speak(f"Continue to next attribute? Y for yes, N to stop")
+                    self._wait_for_speech()
+                    if not self._get_yes_no_response():
+                        break
+                
+                i += 1
             except Exception:
                 # Skip attributes that can't be accessed
+                i += 1
                 continue
-                
-        # If there are more attributes, ask if user wants to continue
-        if len(attrs) > self.max_items_before_prompt:
-            remaining = len(attrs) - self.max_items_before_prompt
-            self.tts.speak(f"{remaining} more attributes. Continue?")
-            self._wait_for_speech()
-            
-            if self._get_yes_no_response():
-                for i in range(self.max_items_before_prompt, len(attrs)):
-                    attr = attrs[i]
-                    try:
-                        value = getattr(obj, attr)
-                        item_name = f"{name}.{attr}"
-                        
-                        if callable(value):
-                            continue
-                            
-                        if isinstance(value, (int, float, str, bool, type(None))):
-                            self._announce_primitive(item_name, value, type(value).__name__)
-                        else:
-                            value_type = type(value).__name__
-                            self.tts.speak(f"{item_name} is {value_type}")
-                            self._wait_for_speech()
-                            
-                            if self._prompt_explore_deeper(item_name):
-                                self.explore_value(item_name, value, depth + 1)
-                    except Exception:
-                        continue
-                        
-    def _prompt_explore_deeper(self, item_name: str) -> bool:
-        """Ask if user wants to explore an item deeper."""
-        self.tts.speak(f"Explore {item_name}? Press y for yes, n for no")
-        self._wait_for_speech()
-        return self._get_yes_no_response()
         
     def _get_yes_no_response(self) -> bool:
         """Get a yes/no response from the user."""
+        print("\n[Explorer] Waiting for response: y/yes or n/no: ", end='', flush=True)
         while True:
             # Check for keyboard input
             if sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
@@ -273,6 +238,7 @@ class NestedValueExplorer:
                 else:
                     self.tts.speak("Please type y for yes or n for no")
                     self._wait_for_speech()
+                    print("\n[Explorer] Please enter y/yes or n/no: ", end='', flush=True)
             time.sleep(0.05)
             
     def _wait_for_speech(self) -> None:
