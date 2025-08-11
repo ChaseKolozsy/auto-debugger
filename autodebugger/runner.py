@@ -357,8 +357,15 @@ class AutoDebugger:
                 exploration_instructions_given = True
         
         if manual_web:
-            # Pass TTS instance to controller if available
-            self._controller = HttpStepController(tts=self._tts) if self._tts else HttpStepController()
+            # Pass TTS instance to controller if available (enhanced controller only)
+            if USE_ENHANCED and self._tts:
+                try:
+                    self._controller = HttpStepController(tts=self._tts)
+                except TypeError:
+                    # Fallback to no tts parameter if using simple controller
+                    self._controller = HttpStepController()
+            else:
+                self._controller = HttpStepController()
             self._controller.start()
             # Set initial audio state if controller supports it
             if hasattr(self._controller, 'set_audio_state'):
@@ -974,7 +981,7 @@ class AutoDebugger:
                                             while self._tts.is_speaking():
                                                 time.sleep(0.05)
                                     should_step_after = False
-                                    break
+                                    continue  # Don't break, just continue to re-prompt
                                 elif action == 'continue':
                                     client.request("continue", {"threadId": thread_id})
                                     should_step_after = False  # Don't step, we already continued
@@ -1167,6 +1174,17 @@ class AutoDebugger:
 
                                             if not selection:
                                                 continue
+                                            if selection == 's':
+                                                # Handle speed change during exploration
+                                                if hasattr(self._controller, 'cycle_audio_speed'):
+                                                    new_speed = self._controller.cycle_audio_speed()
+                                                    if self._tts:
+                                                        speed_rates = {"slow": 150, "medium": 210, "fast": 270}
+                                                        self._tts.rate = speed_rates.get(new_speed, 210)
+                                                        self._tts.speak(f"Speed {new_speed}")
+                                                        while self._tts.is_speaking():
+                                                            time.sleep(0.05)
+                                                continue
                                             if selection == 'n' or selection == 'cancel':
                                                 exploring = False
                                                 break
@@ -1288,6 +1306,17 @@ class AutoDebugger:
                                                 selection = input().strip().lower()
 
                                             if not selection:
+                                                continue
+                                            if selection == 's':
+                                                # Handle speed change during exploration
+                                                if hasattr(self._controller, 'cycle_audio_speed'):
+                                                    new_speed = self._controller.cycle_audio_speed()
+                                                    if self._tts:
+                                                        speed_rates = {"slow": 150, "medium": 210, "fast": 270}
+                                                        self._tts.rate = speed_rates.get(new_speed, 210)
+                                                        self._tts.speak(f"Speed {new_speed}")
+                                                        while self._tts.is_speaking():
+                                                            time.sleep(0.05)
                                                 continue
                                             if selection == 'n' or selection == 'cancel':
                                                 exploring = False

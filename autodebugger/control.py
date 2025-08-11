@@ -36,7 +36,8 @@ class SharedState:
             "variables_delta": {},
             "function_name": None,
             "function_sig": None,
-            "function_body": None
+            "function_body": None,
+            "audio_speed": "medium"  # Track audio speed
         }
     
     def update_state(self, **kwargs):
@@ -62,6 +63,18 @@ class SharedState:
                 self._action_queue.get_nowait()
             except queue.Empty:
                 break
+    
+    def cycle_audio_speed(self) -> str:
+        """Cycle through audio speeds and return new speed."""
+        with self._lock:
+            current = self._current_state["audio_speed"]
+            if current == "slow":
+                self._current_state["audio_speed"] = "medium"
+            elif current == "medium":
+                self._current_state["audio_speed"] = "fast"
+            else:  # fast
+                self._current_state["audio_speed"] = "slow"
+            return self._current_state["audio_speed"]
 
 
 class StepControlHandler(BaseHTTPRequestHandler):
