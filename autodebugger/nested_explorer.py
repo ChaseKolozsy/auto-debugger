@@ -16,7 +16,13 @@ from typing import Any, Dict, List, Optional, Tuple, Union, Callable
 class NestedValueExplorer:
     """Interactive explorer for nested data structures during audio debugging."""
     
-    def __init__(self, tts: Any, verbose: bool = False, action_provider: Optional[Callable[[], Optional[str]]] = None):
+    def __init__(
+        self,
+        tts: Any,
+        verbose: bool = False,
+        action_provider: Optional[Callable[[], Optional[str]]] = None,
+        children_provider: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+    ):
         """
         Initialize the explorer.
         
@@ -30,6 +36,8 @@ class NestedValueExplorer:
         self.max_depth = 5  # Maximum nesting depth to prevent infinite recursion
         # Optional callback to retrieve user actions (for web UI). Should return an action string like 'y'/'n'.
         self._action_provider = action_provider
+        # Optional callback to resolve DAP children lazily when a node has a 'ref'
+        self._children_provider = children_provider
         
     def explore_value(self, name: str, value: Any, depth: int = 0) -> None:
         """
@@ -57,8 +65,10 @@ class NestedValueExplorer:
             self._announce_primitive(name, value, value_type)
             return
             
-        # Handle collections
-        if isinstance(value, (list, tuple)):
+        # Handle collections or DAP nodes
+        if isinstance(value, dict) and ("children" in value or "ref" in value or "value" in value):
+            self._explore_dap_node(name, value, depth)
+        elif isinstance(value, (list, tuple)):
             self._explore_sequence(name, value, value_type, depth)
         elif isinstance(value, dict):
             self._explore_dict(name, value, depth)
@@ -267,6 +277,91 @@ class NestedValueExplorer:
             time.sleep(0.05)
             
             
+    def _resolve_dap_children(self, node: Dict[str, Any]) -> Dict[str, Any]:
+        """Resolve children for a DAP variable node using provider if needed."""
+        children = node.get("children")
+        if isinstance(children, dict) and children:
+            return children
+        ref = node.get("ref")
+        if self._children_provider and isinstance(ref, int) and ref > 0:
+            try:
+                children = self._children_provider(node)
+                if isinstance(children, dict):
+                    node["children"] = children
+                    return children
+            except Exception:
+                pass
+        return children or {}
+
+    def _explore_dap_node(self, name: str, node: Dict[str, Any], depth: int) -> None:
+        """Explore a DAP variable node that may have children and a variablesReference."""
+        # Announce scalar if no children path
+        children = self._resolve_dap_children(node)
+        value_repr = node.get("value")
+        if not children:
+            self._announce_primitive(name, value_repr, type(value_repr).__name__ if value_repr is not None else 'str')
+            return
+
+        # Identify if sequence-like: keys all digits and contiguous
+        keys = list(children.keys())
+        is_sequence = False
+        try:
+            idxs = sorted(int(k) for k in keys if str(k).isdigit())
+            is_sequence = (len(idxs) == len(keys)) and (idxs == list(range(len(keys))))
+        except Exception:
+            is_sequence = False
+
+        if is_sequence:
+            length = len(keys)
+            self.tts.speak(f"{name} is list with {length} items")
+            self._wait_for_speech()
+            i = 0
+            while i < length:
+                item_name = f"{name}[{i}]"
+                item_node = children.get(str(i))
+                # Brief
+                brief = item_node.get("value") if isinstance(item_node, dict) else str(item_node)
+                self.tts.speak(f"{item_name} is {brief[:100] if isinstance(brief, str) else brief}")
+                self._wait_for_speech()
+                # Ask to go deeper if child potentially has children
+                can_deeper = isinstance(item_node, dict) and (item_node.get("children") or (item_node.get("ref") and self._children_provider))
+                if can_deeper:
+                    self.tts.speak(f"{item_name} has nested values. Press Y to explore deeper, N to skip")
+                    self._wait_for_speech()
+                    if self._get_yes_no_response():
+                        self.explore_value(item_name, item_node, depth + 1)
+                if i < length - 1:
+                    self.tts.speak("Continue to next item? Y for yes, N to stop")
+                    self._wait_for_speech()
+                    if not self._get_yes_no_response():
+                        break
+                i += 1
+            return
+
+        # Otherwise treat as mapping
+        self.tts.speak(f"{name} is dictionary with {len(keys)} keys")
+        self._wait_for_speech()
+        i = 0
+        while i < len(keys):
+            key = keys[i]
+            item_name = f"{name}[{repr(key)}]"
+            item_node = children.get(key)
+            brief = item_node.get("value") if isinstance(item_node, dict) else str(item_node)
+            self.tts.speak(f"{item_name} is {brief[:100] if isinstance(brief, str) else brief}")
+            self._wait_for_speech()
+            can_deeper = isinstance(item_node, dict) and (item_node.get("children") or (item_node.get("ref") and self._children_provider))
+            if can_deeper:
+                self.tts.speak(f"{item_name} has nested values. Press Y to explore deeper, N to skip")
+                self._wait_for_speech()
+                if self._get_yes_no_response():
+                    self.explore_value(item_name, item_node, depth + 1)
+            if i < len(keys) - 1:
+                self.tts.speak("Continue to next key? Y for yes, N to stop")
+                self._wait_for_speech()
+                if not self._get_yes_no_response():
+                    break
+            i += 1
+
 def format_nested_value_summary(value: Any, max_depth: int = 2) -> str:
     """
     Format a summary of a nested value for quick audio presentation.

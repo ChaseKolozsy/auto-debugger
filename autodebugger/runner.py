@@ -147,8 +147,29 @@ class AutoDebugger:
             if self._nested_explorer and self._controller:
                 def _provider() -> Optional[str]:
                     return self._controller.wait_for_action(0.1)
+                # Children provider to lazily fetch DAP children when a node has a `ref`
+                def _children_provider(node: Dict[str, Any]) -> Dict[str, Any]:
+                    try:
+                        vref = node.get("ref") or node.get("variablesReference")
+                        if isinstance(vref, int) and vref > 0 and self.client:
+                            res = self.client.request("variables", {"variablesReference": vref})
+                            var_list = res.body.get("variables", []) if res.body else []
+                            child_map: Dict[str, Any] = {}
+                            for c in var_list[:50]:
+                                cname = str(c.get("name"))
+                                cval = c.get("value")
+                                cref = c.get("variablesReference")
+                                entry: Dict[str, Any] = {"value": cval}
+                                if isinstance(cref, int) and cref > 0:
+                                    entry["ref"] = cref
+                                child_map[cname] = entry
+                            return child_map
+                    except Exception:
+                        pass
+                    return {}
                 try:
                     self._nested_explorer._action_provider = _provider  # type: ignore[attr-defined]
+                    self._nested_explorer._children_provider = _children_provider  # type: ignore[attr-defined]
                 except Exception:
                     pass
         # Detect git provenance
@@ -484,7 +505,7 @@ class AutoDebugger:
                                 if vname in skip_names:
                                     continue
                                 vvalue = v.get("value")
-                                scope_map[vname] = vvalue
+                                entry: Dict[str, Any] = {"value": vvalue}
                                 # Shallow expand user variables if expandable
                                 vref = v.get("variablesReference")
                                 if isinstance(vref, int) and vref > 0:
@@ -496,11 +517,21 @@ class AutoDebugger:
                                             cname = str(c.get("name"))
                                             if cname in skip_names:
                                                 continue
-                                            child_map[cname] = c.get("value")
+                                            cval = c.get("value")
+                                            cref = c.get("variablesReference")
+                                            centry: Dict[str, Any] = {"value": cval}
+                                            if isinstance(cref, int) and cref > 0:
+                                                centry["ref"] = cref
+                                            child_map[cname] = centry
                                         if child_map:
-                                            scope_map[vname] = {"value": vvalue, "children": child_map}
+                                            entry["children"] = child_map
                                     except Exception:
                                         pass
+                                        # Always include entry; even without children, it keeps structure for explorer
+                                        # Store a 'ref' if expandable so explorer can lazily fetch deeper
+                                        if isinstance(vref, int) and vref > 0 and "children" not in entry:
+                                            entry["ref"] = vref
+                                        scope_map[vname] = entry
                             vars_payload[scope_name] = scope_map
 
                         # Status/error info
