@@ -1039,13 +1039,13 @@ class AutoDebugger:
                                     if self._tts:
                                         # Try to get function name from frame info
                                         func_name = None
-                                        if curr_file and curr_line:
+                                        if file_path and line:
                                             # Simple heuristic - read function from file
                                             try:
-                                                with open(curr_file, 'r') as f:
+                                                with open(file_path, 'r') as f:
                                                     lines = f.readlines()
                                                 # Look backwards for def
-                                                for i in range(min(curr_line - 1, len(lines) - 1), -1, -1):
+                                                for i in range(min(line - 1, len(lines) - 1), -1, -1):
                                                     if lines[i].strip().startswith('def '):
                                                         func_match = re.search(r'def\s+(\w+)', lines[i])
                                                         if func_match:
