@@ -45,38 +45,51 @@ class NestedValueExplorer:
         
         Args:
             name: Variable name or path (e.g., "x" or "x.field")
-            value: The value to explore
+            value: The value to explore (may be a dict with "_parsed" key for DAP values)
             depth: Current nesting depth
         """
+        # Check if this is a structured DAP value with parsed content
+        if isinstance(value, dict) and "_parsed" in value:
+            # Use the parsed value for exploration
+            actual_value = value["_parsed"]
+            # Keep reference info for lazy loading if needed
+            ref_info = {"ref": value.get("_ref"), "children": value.get("_children")}
+        else:
+            actual_value = value
+            ref_info = None
+            
+        # Continue with exploration using the actual value
         if depth >= self.max_depth:
             self.tts.speak(f"Maximum depth reached for {name}")
             return
             
         # Announce the variable and its type
-        value_type = type(value).__name__
+        value_type = type(actual_value).__name__
         
         # Handle None
-        if value is None:
+        if actual_value is None:
             self.tts.speak(f"{name} is None")
             return
             
         # Handle primitive types
-        if isinstance(value, (int, float, str, bool)):
-            self._announce_primitive(name, value, value_type)
+        if isinstance(actual_value, (int, float, str, bool)):
+            self._announce_primitive(name, actual_value, value_type)
             return
             
-        # Handle collections or DAP nodes
-        if isinstance(value, dict) and ("children" in value or "ref" in value or "value" in value):
-            self._explore_dap_node(name, value, depth)
-        elif isinstance(value, (list, tuple)):
-            self._explore_sequence(name, value, value_type, depth)
-        elif isinstance(value, dict):
-            self._explore_dict(name, value, depth)
-        elif hasattr(value, '__dict__'):
-            self._explore_object(name, value, depth)
+        # Handle collections - use actual_value for real Python objects
+        if isinstance(actual_value, (list, tuple)):
+            self._explore_sequence(name, actual_value, value_type, depth)
+        elif isinstance(actual_value, dict):
+            # Check if this is still a DAP node structure (shouldn't be after parsing)
+            if "children" in actual_value or "ref" in actual_value or "value" in actual_value:
+                self._explore_dap_node(name, actual_value, depth)
+            else:
+                self._explore_dict(name, actual_value, depth)
+        elif hasattr(actual_value, '__dict__'):
+            self._explore_object(name, actual_value, depth)
         else:
             # Fallback for other types
-            self.tts.speak(f"{name} is {value_type}: {str(value)[:100]}")
+            self.tts.speak(f"{name} is {value_type}: {str(actual_value)[:100]}")
             
     def _announce_primitive(self, name: str, value: Any, value_type: str) -> None:
         """Announce a primitive value."""
@@ -367,12 +380,17 @@ def format_nested_value_summary(value: Any, max_depth: int = 2) -> str:
     Format a summary of a nested value for quick audio presentation.
     
     Args:
-        value: The value to summarize
+        value: The value to summarize (may be a dict with "_parsed" key for DAP values)
         max_depth: Maximum depth to traverse
         
     Returns:
         A string summary suitable for TTS
     """
+    # Check if this is a structured DAP value with parsed content
+    if isinstance(value, dict) and "_parsed" in value:
+        # Use the parsed value for summary
+        value = value["_parsed"]
+    
     def _summarize(v: Any, depth: int = 0) -> str:
         if depth >= max_depth:
             return "..."

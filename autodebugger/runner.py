@@ -93,6 +93,73 @@ class AutoDebugger:
                 except Exception:
                     pass
             self._adapter_proc = None
+    
+    def _parse_string_to_object(self, value_str: str) -> Any:
+        """Try to parse a string representation back to a Python object.
+        
+        Handles common cases like lists, dicts, tuples, sets that get stringified by DAP.
+        """
+        if not isinstance(value_str, str):
+            return value_str
+            
+        # Try to parse as JSON first (handles lists, dicts, numbers, bools, null)
+        try:
+            import json
+            return json.loads(value_str)
+        except (json.JSONDecodeError, ValueError):
+            pass
+        
+        # Try to evaluate as Python literal (handles tuples, sets, more complex dicts)
+        try:
+            import ast
+            return ast.literal_eval(value_str)
+        except (ValueError, SyntaxError):
+            pass
+        
+        # Return original string if parsing fails
+        return value_str
+    
+    def _extract_display_values(self, vars_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract displayable values from structured variable format.
+        
+        Converts {"value": ..., "ref": ..., "children": ...} format to display-friendly format
+        while preserving the ability to show nested structures.
+        """
+        result = {}
+        for scope_name, scope_vars in vars_dict.items():
+            if not isinstance(scope_vars, dict):
+                result[scope_name] = scope_vars
+                continue
+            
+            scope_result = {}
+            for var_name, var_info in scope_vars.items():
+                if isinstance(var_info, dict):
+                    # Handle structured format
+                    if "value" in var_info:
+                        # If it has children, create a nested display format
+                        if "children" in var_info and isinstance(var_info["children"], dict):
+                            child_display = {}
+                            for child_name, child_info in var_info["children"].items():
+                                if isinstance(child_info, dict) and "value" in child_info:
+                                    child_display[child_name] = child_info["value"]
+                                else:
+                                    child_display[child_name] = child_info
+                            # Create a display object with the value and children
+                            scope_result[var_name] = {
+                                "value": var_info["value"],
+                                "children": child_display
+                            }
+                        else:
+                            # Just the value for simple variables
+                            scope_result[var_name] = var_info["value"]
+                    else:
+                        # Fallback to the whole object if no value field
+                        scope_result[var_name] = var_info
+                else:
+                    # Handle simple values (backward compatibility)
+                    scope_result[var_name] = var_info
+            result[scope_name] = scope_result
+        return result
 
     def run(
         self,
@@ -527,11 +594,11 @@ class AutoDebugger:
                                             entry["children"] = child_map
                                     except Exception:
                                         pass
-                                        # Always include entry; even without children, it keeps structure for explorer
-                                        # Store a 'ref' if expandable so explorer can lazily fetch deeper
-                                        if isinstance(vref, int) and vref > 0 and "children" not in entry:
-                                            entry["ref"] = vref
-                                        scope_map[vname] = entry
+                                # Always include entry; even without children, it keeps structure for explorer
+                                # Store a 'ref' if expandable so explorer can lazily fetch deeper
+                                if isinstance(vref, int) and vref > 0 and "children" not in entry:
+                                    entry["ref"] = vref
+                                scope_map[vname] = entry
                             vars_payload[scope_name] = scope_map
 
                         # Status/error info
@@ -606,13 +673,16 @@ class AutoDebugger:
                         if manual_mode_active:
                             # Update controller state
                             if self._controller:
+                                # Convert to display format for web view
+                                display_vars = self._extract_display_values(vars_payload)
+                                display_delta = self._extract_display_values(variables_delta) if variables_delta else {}
                                 self._controller.update_state(
                                     session_id=self.session_id,
                                     file=file_path,
                                     line=line,
                                     code=code,
-                                    variables=vars_payload,
-                                    variables_delta=variables_delta,
+                                    variables=display_vars,
+                                    variables_delta=display_delta,
                                     waiting=True,
                                     mode='manual'
                                 )
@@ -857,143 +927,26 @@ class AutoDebugger:
                                             scope_vars = vars_payload.get(scope_name, {}) if isinstance(vars_payload.get(scope_name), dict) else {}
                                             for var_name in scope_delta.keys():
                                                 var_info = scope_vars.get(var_name)
-                                                value = var_info["value"] if isinstance(var_info, dict) and "value" in var_info else var_info
+                                                if isinstance(var_info, dict) and "value" in var_info:
+                                                    # Extract the string value and try to parse it
+                                                    value_str = var_info["value"]
+                                                    value = self._parse_string_to_object(value_str)
+                                                    # Store both the parsed value and the reference if available
+                                                    if "ref" in var_info or "children" in var_info:
+                                                        # Keep the structured info for lazy loading
+                                                        value = {"_parsed": value, "_ref": var_info.get("ref"), "_children": var_info.get("children")}
+                                                else:
+                                                    value = self._parse_string_to_object(var_info) if isinstance(var_info, str) else var_info
                                                 changed_vars.append((scope_name, var_name, value))
 
-                                if changed_vars:
-                                    page = 0
-                                    page_size = 10
-                                    exploring = True
-                                    while exploring:
-                                        start_idx = page * page_size
-                                        end_idx = min(start_idx + page_size, len(changed_vars))
-                                        page_vars = changed_vars[start_idx:end_idx]
-
-                                        # Update web UI to show enumerated items
-                                        if self._controller:
-                                            items_payload = []
-                                            for i, (scope_name, var_name, value) in enumerate(page_vars):
-                                                preview = format_nested_value_summary(value)
-                                                items_payload.append({
-                                                    "index": i,
-                                                    "name": f"{var_name} ({scope_name})",
-                                                    "preview": preview,
-                                                })
-                                            self._controller.update_state(
-                                                explore_active=True,
-                                                explore_items=items_payload,
-                                                explore_page=page,
-                                                explore_total=len(changed_vars),
-                                            )
-
-                                        # Audio announcements if enabled
-                                        if self._tts:
-                                            self._tts.speak(f"Changed variables, page {page + 1}. Select 0 to {len(page_vars) - 1}")
-                                            while self._tts.is_speaking():
-                                                time.sleep(0.05)
-                                            for i, (_s, var_name, value) in enumerate(page_vars):
-                                                brief_value = format_nested_value_summary(value)
-                                                self._tts.speak(f"{i}: {var_name} — {brief_value}")
-                                                while self._tts.is_speaking():
-                                                    time.sleep(0.05)
-                                            if end_idx < len(changed_vars):
-                                                self._tts.speak("Press 0 to 9 to explore, P for next page, or N to cancel")
-                                            else:
-                                                self._tts.speak("Press 0 to 9 to explore, or N to cancel")
-                                            while self._tts.is_speaking():
-                                                time.sleep(0.05)
-
-                                        # Await selection
-                                        selection: Optional[str] = None
-                                        if self._controller:
-                                            while selection is None:
-                                                selection = self._controller.wait_for_action(0.2)
-                                                if selection:
-                                                    selection = selection.strip().lower()
-                                                    break
-                                                if self._abort_requested:
-                                                    selection = 'n'
-                                                    break
-                                        else:
-                                            print(f"\n[Explorer] Select (0-{len(page_vars)-1}, p=next page, n=cancel): ", end='', flush=True)
-                                            selection = input().strip().lower()
-
-                                        if not selection:
-                                            continue
-                                        if selection == 'n' or selection == 'cancel':
-                                            exploring = False
-                                            break
-                                        if selection == 'p' and end_idx < len(changed_vars):
-                                            page += 1
-                                            continue
-                                        if selection.isdigit():
-                                            idx = int(selection)
-                                            if 0 <= idx < len(page_vars):
-                                                _scope, var_name, value = page_vars[idx]
-                                                if self._tts:
-                                                    self._tts.speak(f"Exploring {var_name}")
-                                                    while self._tts.is_speaking():
-                                                        time.sleep(0.05)
-                                                # Explore via nested explorer if available
-                                                if self._nested_explorer:
-                                                    self._nested_explorer.explore_value(var_name, value)
-                                                # Ask whether to explore another
-                                                if self._tts:
-                                                    self._tts.speak("Explore another variable? Y for yes, N to stop")
-                                                    while self._tts.is_speaking():
-                                                        time.sleep(0.05)
-                                                cont_ans: Optional[str] = None
-                                                if self._controller:
-                                                    while cont_ans is None:
-                                                        cont_ans = self._controller.wait_for_action(0.2)
-                                                        if cont_ans:
-                                                            cont_ans = cont_ans.strip().lower()
-                                                            break
-                                                else:
-                                                    print("\n[Explorer] Continue? y/n: ", end='', flush=True)
-                                                    cont_ans = input().strip().lower()
-                                                if cont_ans not in ('y', 'yes'):
-                                                    exploring = False
-                                            else:
-                                                if self._tts:
-                                                    self._tts.speak(f"Invalid selection {selection}")
-                                                    while self._tts.is_speaking():
-                                                        time.sleep(0.05)
-                                        # loop continues
-
-                                    if self._tts:
-                                        self._tts.speak("Exploration complete")
-                                        while self._tts.is_speaking():
-                                            time.sleep(0.05)
-                                    # Clear explore UI
-                                    if self._controller:
-                                        self._controller.update_state(explore_active=False, explore_items=[], explore_total=0)
-                                else:
-                                    if self._tts:
-                                        self._tts.speak("No changes to explore")
-                                        while self._tts.is_speaking():
-                                            time.sleep(0.05)
-                                    # Don't auto-step after exploring; re-prompt for next action
-                                    should_step_after = False
-                                    continue
-                                elif action == 'variables_explore':
-                                    # Explore across all variables, not just changes
-                                    all_vars: List[Tuple[str, str, Any]] = []  # (scope, var_name, value)
-                                    for scope_name in ("Locals", "locals", "Local", "Globals", "globals"):
-                                        scope_vars = vars_payload.get(scope_name)
-                                        if isinstance(scope_vars, dict):
-                                            for var_name, var_info in scope_vars.items():
-                                                value = var_info["value"] if isinstance(var_info, dict) and "value" in var_info else var_info
-                                                all_vars.append((scope_name, var_name, value))
-
-                                    if all_vars:
+                                    if changed_vars:
                                         page = 0
                                         page_size = 10
                                         exploring = True
                                         while exploring:
                                             start_idx = page * page_size
-                                            end_idx = min(start_idx + page_size, len(all_vars))
-                                            page_vars = all_vars[start_idx:end_idx]
+                                            end_idx = min(start_idx + page_size, len(changed_vars))
+                                            page_vars = changed_vars[start_idx:end_idx]
 
                                             # Update web UI to show enumerated items
                                             if self._controller:
@@ -1009,12 +962,12 @@ class AutoDebugger:
                                                     explore_active=True,
                                                     explore_items=items_payload,
                                                     explore_page=page,
-                                                    explore_total=len(all_vars),
+                                                    explore_total=len(changed_vars),
                                                 )
 
-                                            # Audio announcements
+                                            # Audio announcements if enabled
                                             if self._tts:
-                                                self._tts.speak(f"Variables list, page {page + 1}. Select 0 to {len(page_vars) - 1}")
+                                                self._tts.speak(f"Changed variables, page {page + 1}. Select 0 to {len(page_vars) - 1}")
                                                 while self._tts.is_speaking():
                                                     time.sleep(0.05)
                                                 for i, (_s, var_name, value) in enumerate(page_vars):
@@ -1022,7 +975,7 @@ class AutoDebugger:
                                                     self._tts.speak(f"{i}: {var_name} — {brief_value}")
                                                     while self._tts.is_speaking():
                                                         time.sleep(0.05)
-                                                if end_idx < len(all_vars):
+                                                if end_idx < len(changed_vars):
                                                     self._tts.speak("Press 0 to 9 to explore, P for next page, or N to cancel")
                                                 else:
                                                     self._tts.speak("Press 0 to 9 to explore, or N to cancel")
@@ -1041,7 +994,7 @@ class AutoDebugger:
                                                         selection = 'n'
                                                         break
                                             else:
-                                                print(f"\n[Vars] Select (0-{len(page_vars)-1}, p=next page, n=cancel): ", end='', flush=True)
+                                                print(f"\n[Explorer] Select (0-{len(page_vars)-1}, p=next page, n=cancel): ", end='', flush=True)
                                                 selection = input().strip().lower()
 
                                             if not selection:
@@ -1049,7 +1002,7 @@ class AutoDebugger:
                                             if selection == 'n' or selection == 'cancel':
                                                 exploring = False
                                                 break
-                                            if selection == 'p' and end_idx < len(all_vars):
+                                            if selection == 'p' and end_idx < len(changed_vars):
                                                 page += 1
                                                 continue
                                             if selection.isdigit():
@@ -1060,8 +1013,10 @@ class AutoDebugger:
                                                         self._tts.speak(f"Exploring {var_name}")
                                                         while self._tts.is_speaking():
                                                             time.sleep(0.05)
+                                                    # Explore via nested explorer if available
                                                     if self._nested_explorer:
                                                         self._nested_explorer.explore_value(var_name, value)
+                                                    # Ask whether to explore another
                                                     if self._tts:
                                                         self._tts.speak("Explore another variable? Y for yes, N to stop")
                                                         while self._tts.is_speaking():
@@ -1074,7 +1029,7 @@ class AutoDebugger:
                                                                 cont_ans = cont_ans.strip().lower()
                                                                 break
                                                     else:
-                                                        print("\n[Vars] Continue? y/n: ", end='', flush=True)
+                                                        print("\n[Explorer] Continue? y/n: ", end='', flush=True)
                                                         cont_ans = input().strip().lower()
                                                     if cont_ans not in ('y', 'yes'):
                                                         exploring = False
@@ -1086,11 +1041,145 @@ class AutoDebugger:
                                             # loop continues
 
                                         if self._tts:
-                                            self._tts.speak("Variables exploration complete")
+                                            self._tts.speak("Exploration complete")
                                             while self._tts.is_speaking():
                                                 time.sleep(0.05)
+                                        # Clear explore UI
                                         if self._controller:
                                             self._controller.update_state(explore_active=False, explore_items=[], explore_total=0)
+                                    else:
+                                        if self._tts:
+                                            self._tts.speak("No changes to explore")
+                                            while self._tts.is_speaking():
+                                                time.sleep(0.05)
+                                        # Don't auto-step after exploring; re-prompt for next action
+                                        should_step_after = False
+                                        continue
+                            
+                            if action == 'variables_explore':
+                                # Explore across all variables, not just changes
+                                all_vars: List[Tuple[str, str, Any]] = []  # (scope, var_name, value)
+                                for scope_name in ("Locals", "locals", "Local", "Globals", "globals"):
+                                    scope_vars = vars_payload.get(scope_name)
+                                    if isinstance(scope_vars, dict):
+                                        for var_name, var_info in scope_vars.items():
+                                            if isinstance(var_info, dict) and "value" in var_info:
+                                                # Extract the string value and try to parse it
+                                                value_str = var_info["value"]
+                                                value = self._parse_string_to_object(value_str)
+                                                # Store both the parsed value and the reference if available
+                                                if "ref" in var_info or "children" in var_info:
+                                                    # Keep the structured info for lazy loading
+                                                    value = {"_parsed": value, "_ref": var_info.get("ref"), "_children": var_info.get("children")}
+                                            else:
+                                                value = self._parse_string_to_object(var_info) if isinstance(var_info, str) else var_info
+                                            all_vars.append((scope_name, var_name, value))
+
+                                if all_vars:
+                                    page = 0
+                                    page_size = 10
+                                    exploring = True
+                                    while exploring:
+                                        start_idx = page * page_size
+                                        end_idx = min(start_idx + page_size, len(all_vars))
+                                        page_vars = all_vars[start_idx:end_idx]
+
+                                        # Update web UI to show enumerated items
+                                        if self._controller:
+                                            items_payload = []
+                                            for i, (scope_name, var_name, value) in enumerate(page_vars):
+                                                preview = format_nested_value_summary(value)
+                                                items_payload.append({
+                                                    "index": i,
+                                                    "name": f"{var_name} ({scope_name})",
+                                                    "preview": preview,
+                                                })
+                                            self._controller.update_state(
+                                                explore_active=True,
+                                                explore_items=items_payload,
+                                                explore_page=page,
+                                                explore_total=len(all_vars),
+                                            )
+
+                                        # Audio announcements
+                                        if self._tts:
+                                            self._tts.speak(f"Variables list, page {page + 1}. Select 0 to {len(page_vars) - 1}")
+                                            while self._tts.is_speaking():
+                                                time.sleep(0.05)
+                                            for i, (_s, var_name, value) in enumerate(page_vars):
+                                                brief_value = format_nested_value_summary(value)
+                                                self._tts.speak(f"{i}: {var_name} — {brief_value}")
+                                                while self._tts.is_speaking():
+                                                    time.sleep(0.05)
+                                            if end_idx < len(all_vars):
+                                                self._tts.speak("Press 0 to 9 to explore, P for next page, or N to cancel")
+                                            else:
+                                                self._tts.speak("Press 0 to 9 to explore, or N to cancel")
+                                            while self._tts.is_speaking():
+                                                time.sleep(0.05)
+
+                                        # Await selection
+                                        selection: Optional[str] = None
+                                        if self._controller:
+                                            while selection is None:
+                                                selection = self._controller.wait_for_action(0.2)
+                                                if selection:
+                                                    selection = selection.strip().lower()
+                                                    break
+                                                if self._abort_requested:
+                                                    selection = 'n'
+                                                    break
+                                        else:
+                                            print(f"\n[Vars] Select (0-{len(page_vars)-1}, p=next page, n=cancel): ", end='', flush=True)
+                                            selection = input().strip().lower()
+
+                                        if not selection:
+                                            continue
+                                        if selection == 'n' or selection == 'cancel':
+                                            exploring = False
+                                            break
+                                        if selection == 'p' and end_idx < len(all_vars):
+                                            page += 1
+                                            continue
+                                        if selection.isdigit():
+                                            idx = int(selection)
+                                            if 0 <= idx < len(page_vars):
+                                                _scope, var_name, value = page_vars[idx]
+                                                if self._tts:
+                                                    self._tts.speak(f"Exploring {var_name}")
+                                                    while self._tts.is_speaking():
+                                                        time.sleep(0.05)
+                                                if self._nested_explorer:
+                                                    self._nested_explorer.explore_value(var_name, value)
+                                                if self._tts:
+                                                    self._tts.speak("Explore another variable? Y for yes, N to stop")
+                                                    while self._tts.is_speaking():
+                                                        time.sleep(0.05)
+                                                cont_ans: Optional[str] = None
+                                                if self._controller:
+                                                    while cont_ans is None:
+                                                        cont_ans = self._controller.wait_for_action(0.2)
+                                                        if cont_ans:
+                                                            cont_ans = cont_ans.strip().lower()
+                                                            break
+                                                else:
+                                                    print("\n[Vars] Continue? y/n: ", end='', flush=True)
+                                                    cont_ans = input().strip().lower()
+                                                if cont_ans not in ('y', 'yes'):
+                                                    exploring = False
+                                            else:
+                                                if self._tts:
+                                                    self._tts.speak(f"Invalid selection {selection}")
+                                                    while self._tts.is_speaking():
+                                                        time.sleep(0.05)
+                                        # loop continues
+
+                                    if self._tts:
+                                        self._tts.speak("Variables exploration complete")
+                                        while self._tts.is_speaking():
+                                            time.sleep(0.05)
+                                    if self._controller:
+                                        self._controller.update_state(explore_active=False, explore_items=[], explore_total=0)
                                     # Re-prompt for next action
                                     should_step_after = False
                                     continue
