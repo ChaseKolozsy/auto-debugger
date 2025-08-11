@@ -1039,13 +1039,13 @@ class AutoDebugger:
                                     if self._tts:
                                         # Try to get function name from frame info
                                         func_name = None
-                                        if file and line:
+                                        if curr_file and curr_line:
                                             # Simple heuristic - read function from file
                                             try:
-                                                with open(file, 'r') as f:
+                                                with open(curr_file, 'r') as f:
                                                     lines = f.readlines()
                                                 # Look backwards for def
-                                                for i in range(min(line - 1, len(lines) - 1), -1, -1):
+                                                for i in range(min(curr_line - 1, len(lines) - 1), -1, -1):
                                                     if lines[i].strip().startswith('def '):
                                                         func_match = re.search(r'def\s+(\w+)', lines[i])
                                                         if func_match:
@@ -1174,7 +1174,7 @@ class AutoDebugger:
 
                                             if not selection:
                                                 continue
-                                            if selection == 's':
+                                            if selection == 's' or selection == 'speed':
                                                 # Handle speed change during exploration
                                                 if hasattr(self._controller, 'cycle_audio_speed'):
                                                     new_speed = self._controller.cycle_audio_speed()
@@ -1307,7 +1307,7 @@ class AutoDebugger:
 
                                             if not selection:
                                                 continue
-                                            if selection == 's':
+                                            if selection == 's' or selection == 'speed':
                                                 # Handle speed change during exploration
                                                 if hasattr(self._controller, 'cycle_audio_speed'):
                                                     new_speed = self._controller.cycle_audio_speed()
