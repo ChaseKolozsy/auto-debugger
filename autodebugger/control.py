@@ -234,9 +234,12 @@ class StepControlHandler(BaseHTTPRequestHandler):
             
             <div class="controls">
                 <button class="primary" onclick="sendAction('step')">Step (Enter)</button>
-                <button class="success" onclick="sendAction('auto')">Auto Mode</button>
-                <button onclick="sendAction('continue')">Continue</button>
-                <button class="danger" onclick="sendAction('quit')">Quit</button>
+                <button onclick="sendAction('variables')">Variables (V)</button>
+                <button onclick="sendAction('function')">Function (F)</button>
+                <button onclick="sendAction('explore')">Explore (E)</button>
+                <button class="success" onclick="sendAction('auto')">Auto Mode (A)</button>
+                <button onclick="sendAction('continue')">Continue (C)</button>
+                <button class="danger" onclick="sendAction('quit')">Quit (Q)</button>
             </div>
         </div>
         
@@ -244,6 +247,9 @@ class StepControlHandler(BaseHTTPRequestHandler):
             <h3>Keyboard Shortcuts</h3>
             <ul>
                 <li><b>Enter</b> - Step to next line</li>
+                <li><b>v</b> - Read all variables</li>
+                <li><b>f</b> - Read function context</li>
+                <li><b>e</b> - Explore changed variables</li>
                 <li><b>a</b> - Switch to auto mode</li>
                 <li><b>c</b> - Continue execution</li>
                 <li><b>q</b> - Quit debugging</li>
@@ -304,6 +310,12 @@ class StepControlHandler(BaseHTTPRequestHandler):
             if (e.key === 'Enter') {
                 e.preventDefault();
                 sendAction('step');
+            } else if (e.key === 'v' || e.key === 'V') {
+                sendAction('variables');
+            } else if (e.key === 'f' || e.key === 'F') {
+                sendAction('function');
+            } else if (e.key === 'e' || e.key === 'E') {
+                sendAction('explore');
             } else if (e.key === 'a' || e.key === 'A') {
                 sendAction('auto');
             } else if (e.key === 'c' || e.key === 'C') {
@@ -327,12 +339,13 @@ class StepControlHandler(BaseHTTPRequestHandler):
         if self.path == "/command":
             length = int(self.headers.get('Content-Length', 0))
             data = json.loads(self.rfile.read(length))
-            action = data.get('action', '')
-            if action in ['step', 'auto', 'continue', 'quit']:
+            action = str(data.get('action', '') or '')
+            # Accept all actions and forward to the queue. The runner will validate.
+            if action:
                 self.shared.send_action(action)
                 self._send(200, {"status": "ok", "action": action})
             else:
-                self._send(400, {"error": "Invalid action"})
+                self._send(400, {"error": "Missing action"})
         else:
             self.send_error(404)
     

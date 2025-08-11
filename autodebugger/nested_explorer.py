@@ -10,13 +10,13 @@ with y/n prompts to explore deeper levels.
 import sys
 import select
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, Callable
 
 
 class NestedValueExplorer:
     """Interactive explorer for nested data structures during audio debugging."""
     
-    def __init__(self, tts: Any, verbose: bool = False):
+    def __init__(self, tts: Any, verbose: bool = False, action_provider: Optional[Callable[[], Optional[str]]] = None):
         """
         Initialize the explorer.
         
@@ -28,6 +28,8 @@ class NestedValueExplorer:
         self.verbose = verbose
         self.max_items_before_prompt = 3  # Show first 3 items before asking to continue
         self.max_depth = 5  # Maximum nesting depth to prevent infinite recursion
+        # Optional callback to retrieve user actions (for web UI). Should return an action string like 'y'/'n'.
+        self._action_provider = action_provider
         
     def explore_value(self, name: str, value: Any, depth: int = 0) -> None:
         """
@@ -224,7 +226,25 @@ class NestedValueExplorer:
         """Get a yes/no response from the user."""
         print("\n[Explorer] Waiting for response: y/yes or n/no: ", end='', flush=True)
         while True:
-            # Check for keyboard input
+            # Prefer external action provider if available (e.g., web UI)
+            if self._action_provider is not None:
+                action = self._action_provider()
+                if action is None:
+                    time.sleep(0.05)
+                    continue
+                act = str(action).strip().lower()
+                if act in ('y', 'yes'):
+                    if self.verbose:
+                        print("[Explorer] User selected: Yes")
+                    return True
+                if act in ('n', 'no'):
+                    if self.verbose:
+                        print("[Explorer] User selected: No")
+                    return False
+                # Ignore unrelated actions
+                continue
+
+            # Fallback to stdin for terminal mode
             if sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
                 line = sys.stdin.readline().strip().lower()
                 if line in ['y', 'yes']:

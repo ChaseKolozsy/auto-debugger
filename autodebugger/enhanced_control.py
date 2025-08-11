@@ -115,7 +115,12 @@ class SharedState:
             "function_body": None,
             "audio_enabled": False,  # Will be set based on --manual-audio flag
             "audio_available": False,  # Will be set if TTS is available
-            "function_panel_open": False  # Track if function panel is visible
+            "function_panel_open": False,  # Track if function panel is visible
+            # Explore UX state for web interactions
+            "explore_active": False,
+            "explore_items": [],   # list of {index, name, preview}
+            "explore_page": 0,
+            "explore_total": 0
         }
         self._function_cache = {}  # Cache function contexts by (file, line)
     
@@ -478,9 +483,12 @@ class StepControlHandler(BaseHTTPRequestHandler):
                 
                 <div class="controls">
                     <button class="primary" onclick="sendAction('step')">Step (Enter)</button>
-                    <button class="success" onclick="sendAction('auto')">Auto Mode</button>
-                    <button onclick="sendAction('continue')">Continue</button>
-                    <button class="danger" onclick="sendAction('quit')">Quit</button>
+                    <button onclick="sendAction('variables')">Variables (V)</button>
+                    <button onclick="sendAction('function')">Function (F)</button>
+                    <button onclick="sendAction('explore')">Explore (E)</button>
+                    <button class="success" onclick="sendAction('auto')">Auto Mode (A)</button>
+                    <button onclick="sendAction('continue')">Continue (C)</button>
+                    <button class="danger" onclick="sendAction('quit')">Quit (Q)</button>
                     <button id="audioToggle" onclick="toggleAudio()">🔇 Audio Off</button>
                 </div>
             </div>
@@ -489,10 +497,13 @@ class StepControlHandler(BaseHTTPRequestHandler):
                 <h3>Keyboard Shortcuts</h3>
                 <ul>
                     <li><b>Enter</b> - Step to next line</li>
+                    <li><b>v</b> - Read all variables</li>
+                    <li><b>f</b> - Read function context</li>
+                    <li><b>e</b> - Explore changed variables</li>
                     <li><b>a</b> - Switch to auto mode</li>
                     <li><b>c</b> - Continue execution</li>
                     <li><b>q</b> - Quit debugging</li>
-                    <li><b>x</b> - Toggle function context</li>
+                    <li><b>x</b> - Toggle function context display</li>
                     <li><b>m</b> - Toggle audio mute/unmute</li>
                 </ul>
             </div>
@@ -615,7 +626,32 @@ class StepControlHandler(BaseHTTPRequestHandler):
             
             // Update changes
             if (state.variables_delta) {
-                renderVariables(state.variables_delta, 'changes', true);
+                // If exploration is active, render enumerated items for selection
+                if (state.explore_active && Array.isArray(state.explore_items) && state.explore_items.length > 0) {
+                    const container = document.getElementById('changes');
+                    let html = '';
+                    html += '<div class="section-title">Changed (page ' + (Number(state.explore_page || 0) + 1) + ')</div>';
+                    for (const item of state.explore_items) {
+                        html += '<div class="variable-item">';
+                        html += '<div class="variable-name">[' + item.index + '] ' + item.name + '</div>';
+                        html += '<div class="variable-value">' + String(item.preview || '') + '</div>';
+                        html += '</div>';
+                    }
+                    const total = Number(state.explore_total || 0);
+                    const page = Number(state.explore_page || 0);
+                    const hasNext = (page + 1) * 10 < total;
+                    html += '<div class="hint">Press 0-9 to explore, ' + (hasNext ? 'P next page, ' : '') + 'N cancel</div>';
+                    container.innerHTML = html;
+                    // Click to select
+                    container.querySelectorAll('.variable-item').forEach((node, idx) => {
+                        node.style.cursor = 'pointer';
+                        node.addEventListener('click', () => {
+                            sendAction(String(idx));
+                        });
+                    });
+                } else {
+                    renderVariables(state.variables_delta, 'changes', true);
+                }
             }
             
             // Update audio button
@@ -685,6 +721,12 @@ class StepControlHandler(BaseHTTPRequestHandler):
             if (e.key === 'Enter') {
                 e.preventDefault();
                 sendAction('step');
+            } else if (e.key === 'v' || e.key === 'V') {
+                sendAction('variables');
+            } else if (e.key === 'f' || e.key === 'F') {
+                sendAction('function');
+            } else if (e.key === 'e' || e.key === 'E') {
+                sendAction('explore');
             } else if (e.key === 'a' || e.key === 'A') {
                 sendAction('auto');
             } else if (e.key === 'c' || e.key === 'C') {
@@ -695,6 +737,24 @@ class StepControlHandler(BaseHTTPRequestHandler):
                 toggleFunction();
             } else if (e.key === 'm' || e.key === 'M') {
                 toggleAudio();
+            } else if (e.key >= '0' && e.key <= '9') {
+                // Selection in explore mode
+                sendAction(e.key);
+            } else if (e.key === 'p' || e.key === 'P') {
+                // Next page in explore mode
+                sendAction('p');
+            } else if (e.key === 'n' || e.key === 'N') {
+                // Cancel explore or answer 'yes' depending on prompt
+                sendAction('n');
+            } else if (e.key === 'i' || e.key === 'I') {
+                // Step in (maps to yes)
+                sendAction('y');
+            } else if (e.key === 'o' || e.key === 'O') {
+                // Step out (maps to no)
+                sendAction('n');
+            } else if (e.key === 'b' || e.key === 'B') {
+                // Back (treat as cancel/no)
+                sendAction('n');
             }
         });
         
@@ -712,12 +772,13 @@ class StepControlHandler(BaseHTTPRequestHandler):
         if self.path == "/command":
             length = int(self.headers.get('Content-Length', 0))
             data = json.loads(self.rfile.read(length))
-            action = data.get('action', '')
-            if action in ['step', 'auto', 'continue', 'quit']:
+            action = str(data.get('action', '') or '')
+            # Accept any action string (e.g., 'variables', 'function', 'explore', digits for selection)
+            if action:
                 self.shared.send_action(action)
                 self._send(200, {"status": "ok", "action": action})
             else:
-                self._send(400, {"error": "Invalid action"})
+                self._send(400, {"error": "Missing action"})
         elif self.path == "/toggle-audio":
             new_state = self.shared.toggle_audio()
             self._send(200, {"status": "ok", "audio_enabled": new_state})

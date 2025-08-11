@@ -12,7 +12,16 @@ Usage
 Manual stepping mode
 - Interactive debugging: `autodebug run --manual path/to/script.py`
   - Step through code line-by-line with manual control
-  - Press Enter to step, 'a' for auto mode, 'c' to continue, 'q' to quit
+  - Keyboard shortcuts:
+    - Enter: step to next line
+    - v: read all current variables
+    - f: read function context
+    - e: explore changed variables interactively
+      - Select 0-9 to choose specific change
+      - Press p to paginate to next 10 changes
+    - a: switch to auto mode
+    - c: continue execution
+    - q: quit
 - Web interface: `autodebug run --manual --manual-web path/to/script.py`
   - Opens a web UI at `http://127.0.0.1:PORT` with Step/Auto/Continue/Quit buttons
   - Real-time display of current file, line number, and code
