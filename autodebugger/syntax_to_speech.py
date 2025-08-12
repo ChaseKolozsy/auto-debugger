@@ -130,6 +130,15 @@ def syntax_to_speech_code(code: str) -> str:
         string_char = None
         i = 0
         
+        # Check if this line contains patterns that suggest implicit tuples
+        stripped_line = line.strip()
+        # Detect return with multiple values, tuple unpacking, or multiple assignment
+        implicit_tuple_context = (
+            stripped_line.startswith('return ') and ',' in stripped_line or
+            '=' in stripped_line and ',' in stripped_line or  # any assignment with commas
+            stripped_line.startswith('for ') and ',' in stripped_line.split(' in ')[0] if ' in ' in stripped_line else False  # for loop unpacking
+        )
+        
         while i < len(line):
             char = line[i]
             
@@ -187,9 +196,12 @@ def syntax_to_speech_code(code: str) -> str:
                         brace_depth -= 1
                     else:
                         result += " close brace "
-                elif char == ',' and (paren_depth > 0 or bracket_depth > 0 or brace_depth > 0):
-                    # Announce comma when inside a collection
-                    result += " comma "
+                elif char == ',':
+                    # Announce comma when inside a collection OR in implicit tuple context
+                    if paren_depth > 0 or bracket_depth > 0 or brace_depth > 0 or implicit_tuple_context:
+                        result += " comma "
+                    else:
+                        result += char
                 else:
                     result += char
             else:
