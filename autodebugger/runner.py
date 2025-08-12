@@ -1168,13 +1168,20 @@ class AutoDebugger:
                                                     block_idx = int(block_action)
                                                     block = explorer.select_block(block_idx)
                                                     if block:
+                                                        # Stop any current audio before starting new selection
+                                                        if self._tts:
+                                                            self._tts.stop()
                                                         explorer.speak_block(block)
                                                     else:
+                                                        if self._tts:
+                                                            self._tts.stop()
                                                         self._tts.speak("Invalid block number")
                                                         self._wait_for_speech_with_interrupt()
                                                 
                                                 elif block_action in ['n', 'next']:
                                                     # Next page
+                                                    if self._tts:
+                                                        self._tts.stop()
                                                     if explorer.next_page():
                                                         self._tts.speak(explorer.announce_page_info())
                                                         self._wait_for_speech_with_interrupt()
@@ -1184,6 +1191,8 @@ class AutoDebugger:
                                                 
                                                 elif block_action in ['prev', 'previous'] or (block_action == 'p' and not block_action.isdigit()):
                                                     # Previous page
+                                                    if self._tts:
+                                                        self._tts.stop()
                                                     if explorer.previous_page():
                                                         self._tts.speak(explorer.announce_page_info())
                                                         self._wait_for_speech_with_interrupt()
@@ -1335,6 +1344,9 @@ class AutoDebugger:
                                                 exploring = False
                                                 break
                                             if selection == 'p' and end_idx < len(changed_vars):
+                                                # Stop any current audio before changing pages
+                                                if self._tts:
+                                                    self._tts.stop()
                                                 page += 1
                                                 announce_list = True  # Re-announce when changing pages
                                                 continue
@@ -1343,6 +1355,8 @@ class AutoDebugger:
                                                 if 0 <= idx < len(page_vars):
                                                     _scope, var_name, value = page_vars[idx]
                                                     if self._tts:
+                                                        # Stop any current audio before starting new selection
+                                                        self._tts.stop()
                                                         self._tts.speak(f"Exploring {var_name}")
                                                         self._wait_for_speech_with_interrupt()
                                                     # Explore via nested explorer if available
@@ -1465,6 +1479,9 @@ class AutoDebugger:
                                                 exploring = False
                                                 break
                                             if selection == 'p' and end_idx < len(all_vars):
+                                                # Stop any current audio before changing pages
+                                                if self._tts:
+                                                    self._tts.stop()
                                                 page += 1
                                                 announce_list = True  # Re-announce when changing pages
                                                 continue
