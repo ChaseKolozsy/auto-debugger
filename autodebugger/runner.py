@@ -1112,15 +1112,11 @@ class AutoDebugger:
                                             while exploring_blocks:
                                                 # Get user input for block exploration
                                                 if self._controller:
-                                                    # Get action from web controller with shorter timeout
+                                                    # Get action from web controller only - no terminal fallback
                                                     block_action = self._controller.shared_state.get_action(timeout=0.5)
                                                     if not block_action:
-                                                        # No input from web, get simple terminal input
-                                                        print("\n[blocks] 0-9=select, n=next, p=prev, s=speed, q=quit: ", end='', flush=True)
-                                                        try:
-                                                            block_action = input().strip().lower()
-                                                        except (EOFError, KeyboardInterrupt):
-                                                            block_action = 'q'
+                                                        # Continue waiting for web input
+                                                        continue
                                                 else:
                                                     # Terminal interface - simple input for block exploration
                                                     print("\n[blocks] 0-9=select, n=next, p=prev, s=speed, q=quit: ", end='', flush=True)
