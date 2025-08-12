@@ -907,13 +907,13 @@ def create_unified_app(db_path: Optional[str] = None) -> Flask:
     
     @app.route("/api/session/<session_id>/line/<line_id>/explore", methods=["POST"])
     def explore_variable(session_id: str, line_id: str):
-        """Interactive variable exploration with audio."""
+        """Simple variable speaking - just announces the value."""
         interface.store.open()
         conn = interface.store.conn
         assert conn is not None
         
         var_name = request.json.get("variable")
-        var_path = request.json.get("path", [])  # For nested exploration
+        var_path = request.json.get("path", [])  # For scope navigation
         
         cur = conn.cursor()
         cur.execute("SELECT variables, variables_delta FROM line_reports WHERE session_id=? AND id=?",
@@ -922,11 +922,19 @@ def create_unified_app(db_path: Optional[str] = None) -> Flask:
         if not row:
             return jsonify({"error": "Line not found"}), 404
         
-        variables = json.loads(row[0] or "{}")
-        variables_parsed = parse_dap_variables(variables)
+        # Determine if we're looking at changes or variables
+        is_changes = request.json.get("is_changes", False)
         
-        # Navigate to the variable
-        target = variables_parsed
+        if is_changes:
+            # Get changes
+            delta = json.loads(row[1] or "{}")
+            target = parse_dap_variables(delta)
+        else:
+            # Get variables
+            variables = json.loads(row[0] or "{}")
+            target = parse_dap_variables(variables)
+        
+        # Navigate to the scope if path provided
         for key in var_path:
             if isinstance(target, dict):
                 target = target.get(key, {})
@@ -936,15 +944,14 @@ def create_unified_app(db_path: Optional[str] = None) -> Flask:
         if var_name and isinstance(target, dict):
             value = target.get(var_name)
             
-            # Initialize explorer if needed
-            if not interface.explorer:
-                if not interface.tts:
-                    interface.tts = AudioTTS(verbose=True)
-                interface.explorer = NestedValueExplorer(interface.tts, verbose=True)
+            # Initialize TTS if needed
+            if not interface.tts:
+                interface.tts = AudioTTS(verbose=True)
             
-            # Speak the value
+            # Speak the value directly (simple announcement)
             if request.json.get("speak", True):
-                interface.explorer.explore_interactive(var_name, value)
+                summary = summarize_value(value) if isinstance(value, (dict, list)) else str(value)
+                interface.tts.speak(f"{var_name}: {summary}", interrupt=True)
             
             return jsonify({
                 "name": var_name,

@@ -1345,6 +1345,7 @@
           body: JSON.stringify({
             variable: changeName,
             path: scope ? [scope] : [],  // Include scope in path if available
+            is_changes: true,  // Flag to indicate we're exploring changes
             speak: true
           })
         });
