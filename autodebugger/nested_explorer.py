@@ -715,8 +715,14 @@ class NestedValueExplorer:
             time.sleep(0.05)
             
     def _wait_for_speech(self) -> None:
-        """Wait for TTS to finish speaking."""
+        """Wait for TTS to finish speaking, checking for interrupts."""
         while self.tts.is_speaking():
+            # Check for interrupts if action provider is available
+            if self.action_provider:
+                action = self.action_provider()
+                if action == 'interrupt':
+                    # Audio was already stopped by the action provider
+                    return
             time.sleep(0.05)
             
             

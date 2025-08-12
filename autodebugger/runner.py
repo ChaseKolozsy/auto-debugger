@@ -369,7 +369,24 @@ class AutoDebugger:
             # Pass data fetcher to allow fetching complete data when ellipsis is encountered
             def _data_fetcher(ref: int) -> Any:
                 return self._fetch_complete_value(ref) if self.client else None
-            self._nested_explorer = NestedValueExplorer(self._tts, verbose=False, data_fetcher=_data_fetcher)
+            
+            # Pass action provider to allow checking for interrupts
+            def _action_provider() -> Optional[str]:
+                if self._controller:
+                    action = self._controller.wait_for_action(0.01)
+                    if action and action.strip().lower() == 'stop_audio':
+                        if self._tts:
+                            self._tts.stop()
+                        return 'interrupt'
+                    return action
+                return None
+            
+            self._nested_explorer = NestedValueExplorer(
+                self._tts, 
+                verbose=False, 
+                data_fetcher=_data_fetcher,
+                action_provider=_action_provider
+            )
             
             # Give initial instructions if starting in manual mode
             if manual_mode_active:
