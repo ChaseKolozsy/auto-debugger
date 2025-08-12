@@ -786,4 +786,208 @@ def create_unified_app(db_path: Optional[str] = None) -> Flask:
         # For now, return empty list
         return jsonify({"sessions": []})
     
+    @app.route("/api/session/<session_id>/line/<line_id>/speak", methods=["POST"])
+    def speak_line(session_id: str, line_id: str):
+        """Speak a specific line's content and changes."""
+        interface.store.open()
+        conn = interface.store.conn
+        assert conn is not None
+        
+        # Initialize TTS if needed
+        if not interface.tts:
+            interface.tts = AudioTTS(verbose=True)
+        
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT code, line_number, variables, variables_delta, status, error_message
+            FROM line_reports 
+            WHERE session_id=? AND id=?
+        """, (session_id, line_id))
+        
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"error": "Line not found"}), 404
+        
+        code, line_no, vars_json, delta_json, status, error = row
+        
+        # Parse variables
+        variables = json.loads(vars_json or "{}")
+        delta = json.loads(delta_json or "{}")
+        variables_parsed = parse_dap_variables(variables)
+        delta_parsed = parse_dap_variables(delta)
+        
+        # Speak the line
+        text = f"Line {line_no}. {code.strip() if code else 'no code captured'}"
+        interface.tts.speak(text, interrupt=True, is_code=True)
+        
+        # Optionally speak scope
+        if request.json.get("speak_scope", True):
+            brief = interface.format_scope_brief(variables_parsed)
+            if brief:
+                interface.tts.speak(f"Scope: {brief}")
+        
+        # Speak changes
+        summary = summarize_delta(delta_parsed)
+        if summary and summary != "no changes":
+            interface.tts.speak(f"Changes: {summary}")
+        
+        # Speak error if any
+        if status == "error" and error:
+            interface.tts.speak(f"Error: {error}")
+        
+        return jsonify({"status": "speaking", "text": text})
+    
+    @app.route("/api/session/<session_id>/line/<line_id>/function", methods=["GET"])
+    def get_function_context_api(session_id: str, line_id: str):
+        """Get function context for a line."""
+        interface.store.open()
+        conn = interface.store.conn
+        assert conn is not None
+        
+        cur = conn.cursor()
+        cur.execute("SELECT file, line_number FROM line_reports WHERE session_id=? AND id=?", 
+                   (session_id, line_id))
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"error": "Line not found"}), 404
+        
+        file_path, line_no = row
+        func_ctx = interface.get_function_context(file_path, line_no, session_id)
+        
+        # Optionally speak it
+        if request.args.get("speak") == "true":
+            if not interface.tts:
+                interface.tts = AudioTTS(verbose=True)
+            
+            if func_ctx["sig"]:
+                interface.tts.speak(f"Function: {func_ctx['sig']}", interrupt=True)
+            if request.args.get("full") == "true" and func_ctx["body"]:
+                interface.tts.speak(f"Body: {func_ctx['body']}")
+        
+        return jsonify(func_ctx)
+    
+    @app.route("/api/session/<session_id>/line/<line_id>/variables", methods=["GET"])
+    def get_variables_detailed(session_id: str, line_id: str):
+        """Get detailed variables for exploration."""
+        interface.store.open()
+        conn = interface.store.conn
+        assert conn is not None
+        
+        cur = conn.cursor()
+        cur.execute("SELECT variables, variables_delta FROM line_reports WHERE session_id=? AND id=?",
+                   (session_id, line_id))
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"error": "Line not found"}), 404
+        
+        variables = json.loads(row[0] or "{}")
+        delta = json.loads(row[1] or "{}")
+        
+        variables_parsed = parse_dap_variables(variables)
+        delta_parsed = parse_dap_variables(delta)
+        
+        # Optionally speak variables
+        if request.args.get("speak") == "true":
+            if not interface.tts:
+                interface.tts = AudioTTS(verbose=True)
+            
+            if request.args.get("mode") == "summary":
+                brief = interface.format_scope_brief(variables_parsed)
+                interface.tts.speak(f"Variables: {brief}", interrupt=True)
+            elif request.args.get("mode") == "changes":
+                summary = summarize_delta(delta_parsed)
+                interface.tts.speak(f"Changes: {summary}", interrupt=True)
+        
+        return jsonify({
+            "variables": variables_parsed,
+            "changes": delta_parsed,
+            "summary": interface.format_scope_brief(variables_parsed),
+            "changes_summary": summarize_delta(delta_parsed)
+        })
+    
+    @app.route("/api/session/<session_id>/line/<line_id>/explore", methods=["POST"])
+    def explore_variable(session_id: str, line_id: str):
+        """Interactive variable exploration with audio."""
+        interface.store.open()
+        conn = interface.store.conn
+        assert conn is not None
+        
+        var_name = request.json.get("variable")
+        var_path = request.json.get("path", [])  # For nested exploration
+        
+        cur = conn.cursor()
+        cur.execute("SELECT variables, variables_delta FROM line_reports WHERE session_id=? AND id=?",
+                   (session_id, line_id))
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"error": "Line not found"}), 404
+        
+        variables = json.loads(row[0] or "{}")
+        variables_parsed = parse_dap_variables(variables)
+        
+        # Navigate to the variable
+        target = variables_parsed
+        for key in var_path:
+            if isinstance(target, dict):
+                target = target.get(key, {})
+            else:
+                return jsonify({"error": "Invalid path"}), 400
+        
+        if var_name and isinstance(target, dict):
+            value = target.get(var_name)
+            
+            # Initialize explorer if needed
+            if not interface.explorer:
+                if not interface.tts:
+                    interface.tts = AudioTTS(verbose=True)
+                interface.explorer = NestedValueExplorer(interface.tts, verbose=True)
+            
+            # Speak the value
+            if request.json.get("speak", True):
+                interface.explorer.explore_interactive(var_name, value)
+            
+            return jsonify({
+                "name": var_name,
+                "value": value,
+                "summary": summarize_value(value),
+                "type": type(value).__name__ if value is not None else "None"
+            })
+        
+        return jsonify({"error": "Variable not found"}), 404
+    
+    @app.route("/api/tts/stop", methods=["POST"])
+    def stop_tts():
+        """Stop current TTS playback."""
+        if interface.tts:
+            interface.tts.stop()
+        return jsonify({"status": "stopped"})
+    
+    @app.route("/api/tts/speed", methods=["POST"])
+    def set_tts_speed():
+        """Set TTS speed."""
+        speed = request.json.get("speed", "medium")
+        if speed not in ["slow", "medium", "fast"]:
+            return jsonify({"error": "Invalid speed"}), 400
+        
+        interface.current_speed = speed
+        if interface.tts:
+            interface.tts.set_speed(speed)
+        
+        return jsonify({"speed": speed})
+    
+    @app.route("/api/session/<session_id>/playback", methods=["POST"])
+    def start_playback(session_id: str):
+        """Start automated playback of a session."""
+        mode = request.json.get("mode", "auto")
+        delay = request.json.get("delay", 0.4)
+        speak_scope = request.json.get("speak_scope", True)
+        
+        # This would need to be async or use threading for real-time control
+        # For now, return a status
+        return jsonify({
+            "status": "playback_started",
+            "session_id": session_id,
+            "mode": mode
+        })
+    
     return app
