@@ -237,10 +237,34 @@ def summarize_value(value: Any, max_len: int = 120) -> str:
             return "empty set"
         return f"set with {len(value)} items"
     
-    # For strings and other simple types
+    # Handle strings specifically
+    if isinstance(value, str):
+        if len(value) > 10:
+            return f"string with {len(value)} characters"
+        return value
+    
+    # Handle integers and floats
+    if isinstance(value, (int, float)):
+        s = str(value)
+        if len(s) > 10:
+            if isinstance(value, int):
+                return f"integer with {len(s)} digits"
+            else:
+                # For floats, count digits excluding the decimal point
+                digits = len(s.replace('.', '').replace('-', '').replace('e', '').replace('+', ''))
+                return f"float with {digits} digits"
+        return s
+    
+    # Handle booleans explicitly
+    if isinstance(value, bool):
+        return str(value)
+    
+    # For other types, convert to string with truncation
     s = str(value)
     if len(s) > max_len:
-        s = s[:max_len - 3] + "..."
+        # Try to identify the type for better description
+        type_name = type(value).__name__
+        return f"{type_name} with {len(s)} character representation"
     return s
 
 
