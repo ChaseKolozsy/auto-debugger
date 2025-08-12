@@ -1107,7 +1107,15 @@ class AutoDebugger:
                                             exploring_blocks = True
                                             while exploring_blocks:
                                                 # Get user input
-                                                block_action = prompt_for_action(self._controller, timeout=None)
+                                                if self._controller:
+                                                    # Get action from web controller if available
+                                                    block_action = self._controller.shared_state.get_action(timeout=10.0)
+                                                    if not block_action:
+                                                        # No input from web, try terminal
+                                                        block_action = prompt_for_action(timeout=None)
+                                                else:
+                                                    # Terminal interface
+                                                    block_action = prompt_for_action(timeout=None)
                                                 
                                                 if block_action and block_action.isdigit():
                                                     # Select block by number
