@@ -128,7 +128,7 @@
   <div>
     <div>Entry: <code>{{session.file}}</code></div>
     <div>Language: {{session.language}}</div>
-    <div>Lines: {{session.total_lines_executed}} | Errors: {{session.lines_with_errors}} | Crashes: {{session.total_crashes}} | Size: {{ (session.size_bytes // 1024) }} KB</div>
+    <div>Lines: {{session.total_lines_executed}} | Errors: {{session.lines_with_errors}} | Crashes: {{session.total_crashes}}{% if session.size_bytes %} | Size: {{ (session.size_bytes // 1024) }} KB{% endif %}</div>
   </div>
 
   <form method="get" class="filters">
