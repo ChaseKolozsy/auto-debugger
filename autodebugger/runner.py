@@ -99,6 +99,23 @@ class AutoDebugger:
                     pass
             self._adapter_proc = None
     
+    def _wait_for_speech_with_interrupt(self) -> bool:
+        """Wait for TTS to finish speaking, but check for stop_audio interrupts.
+        Returns True if speech completed, False if interrupted."""
+        if not self._tts:
+            return True
+            
+        while self._tts.is_speaking():
+            # Check for stop_audio action if controller is available
+            if self._controller:
+                action = self._controller.wait_for_action(0.05)
+                if action and action.strip().lower() == 'stop_audio':
+                    self._tts.stop()
+                    return False
+            else:
+                time.sleep(0.05)
+        return True
+    
     def _parse_string_to_object(self, value_str: str) -> Any:
         """Try to parse a string representation back to a Python object.
         
@@ -357,8 +374,7 @@ class AutoDebugger:
             # Give initial instructions if starting in manual mode
             if manual_mode_active:
                 self._tts.speak("Manual mode. Press V for variables, F for function, P for function parts, E to explore changes")
-                while self._tts.is_speaking():
-                    time.sleep(0.05)
+                self._wait_for_speech_with_interrupt()
                 exploration_instructions_given = True
         
         if manual_web:
@@ -672,8 +688,7 @@ class AutoDebugger:
                                         # Give instructions when activating manual mode
                                         if self._tts and not exploration_instructions_given:
                                             self._tts.speak(f"Manual mode activated. Press V for variables, F for function, P for function parts, E to explore")
-                                            while self._tts.is_speaking():
-                                                time.sleep(0.05)
+                                            self._wait_for_speech_with_interrupt()
                                             exploration_instructions_given = True
                                         
                                         print(f"\n[manual] Activated at {os.path.basename(file_check)}:{line_check}\n", flush=True)
@@ -888,8 +903,7 @@ class AutoDebugger:
                                 self._tts.speak(announcement, interrupt=True, is_code=True)
                                 
                                 # Wait for main announcement to finish before scope
-                                while self._tts.is_speaking():
-                                    time.sleep(0.05)
+                                self._wait_for_speech_with_interrupt()
                                 
                                 # Summarize scope
                                 def _scope_brief(variables: Dict[str, Any], max_pairs: int = 10) -> str:
@@ -947,15 +961,13 @@ class AutoDebugger:
                                             self._tts.speak(f"1 change:")
                                         else:
                                             self._tts.speak(f"{total_changes} changes:")
-                                        while self._tts.is_speaking():
-                                            time.sleep(0.05)
+                                        self._wait_for_speech_with_interrupt()
                                         
                                         # Then announce each change
                                         for change in change_parts:
                                             self._tts.speak(change)
                                             print(f"[TTS] {change}")
-                                            while self._tts.is_speaking():
-                                                time.sleep(0.05)
+                                            self._wait_for_speech_with_interrupt()
                             
                             # Loop while at this stopped event to allow multiple actions
                             while True:
@@ -1010,8 +1022,7 @@ class AutoDebugger:
                                             speed_rates = {"slow": 150, "medium": 210, "fast": 270}
                                             self._tts.rate_wpm = speed_rates.get(new_speed, 210)
                                             self._tts.speak(f"Speed {new_speed}")
-                                            while self._tts.is_speaking():
-                                                time.sleep(0.05)
+                                            self._wait_for_speech_with_interrupt()
                                     should_step_after = False
                                     continue  # Don't break, just continue to re-prompt
                                 elif action == 'continue':
@@ -1033,8 +1044,7 @@ class AutoDebugger:
                                                 scope_vars = vars_payload[scope_name]
                                                 if isinstance(scope_vars, dict) and scope_vars:
                                                     self._tts.speak(f"Variables in {scope_name}")
-                                                    while self._tts.is_speaking():
-                                                        time.sleep(0.05)
+                                                    self._wait_for_speech_with_interrupt()
                                                     
                                                     # Read each variable
                                                     for var_name, var_info in scope_vars.items():
@@ -1049,20 +1059,17 @@ class AutoDebugger:
                                                             value_str = value_str[:100] + "..."
                                                         
                                                         self._tts.speak(f"{var_name} is {value_str}")
-                                                        while self._tts.is_speaking():
-                                                            time.sleep(0.05)
+                                                        self._wait_for_speech_with_interrupt()
                                                     
                                                     read_any = True
                                                     break  # Usually we only need Locals
                                         
                                         if not read_any:
                                             self._tts.speak("No variables in scope")
-                                            while self._tts.is_speaking():
-                                                time.sleep(0.05)
+                                            self._wait_for_speech_with_interrupt()
                                     else:
                                         self._tts.speak("No variables available")
-                                        while self._tts.is_speaking():
-                                            time.sleep(0.05)
+                                        self._wait_for_speech_with_interrupt()
                                     # After speaking variables, re-prompt for another action
                                     should_step_after = False
                                     continue
@@ -1090,22 +1097,18 @@ class AutoDebugger:
                                         # Announce the function info
                                         if func_name:
                                             self._tts.speak(f"In function {func_name}")
-                                            while self._tts.is_speaking():
-                                                time.sleep(0.05)
+                                            self._wait_for_speech_with_interrupt()
                                             if func_sig:
                                                 self._tts.speak(f"Signature: {func_sig}", is_code=True)
-                                                while self._tts.is_speaking():
-                                                    time.sleep(0.05)
+                                                self._wait_for_speech_with_interrupt()
                                             if func_body:
                                                 # Read the full function body (or up to reasonable limit)
                                                 # No need to truncate further - common.py already limits to 3000 chars
                                                 self._tts.speak(f"Body: {func_body}", is_code=True)
-                                                while self._tts.is_speaking():
-                                                    time.sleep(0.05)
+                                                self._wait_for_speech_with_interrupt()
                                         else:
                                             self._tts.speak("Not currently in a function")
-                                            while self._tts.is_speaking():
-                                                time.sleep(0.05)
+                                            self._wait_for_speech_with_interrupt()
                                         # After speaking function context, re-prompt for another action
                                         should_step_after = False
                                         continue
@@ -1135,8 +1138,7 @@ class AutoDebugger:
                                             
                                             # Announce page info
                                             self._tts.speak(explorer.announce_page_info())
-                                            while self._tts.is_speaking():
-                                                time.sleep(0.05)
+                                            self._wait_for_speech_with_interrupt()
                                             
                                             # Enter block selection loop
                                             exploring_blocks = True
@@ -1169,30 +1171,25 @@ class AutoDebugger:
                                                         explorer.speak_block(block)
                                                     else:
                                                         self._tts.speak("Invalid block number")
-                                                        while self._tts.is_speaking():
-                                                            time.sleep(0.05)
+                                                        self._wait_for_speech_with_interrupt()
                                                 
                                                 elif block_action in ['n', 'next']:
                                                     # Next page
                                                     if explorer.next_page():
                                                         self._tts.speak(explorer.announce_page_info())
-                                                        while self._tts.is_speaking():
-                                                            time.sleep(0.05)
+                                                        self._wait_for_speech_with_interrupt()
                                                     else:
                                                         self._tts.speak("Already at last page")
-                                                        while self._tts.is_speaking():
-                                                            time.sleep(0.05)
+                                                        self._wait_for_speech_with_interrupt()
                                                 
                                                 elif block_action in ['prev', 'previous'] or (block_action == 'p' and not block_action.isdigit()):
                                                     # Previous page
                                                     if explorer.previous_page():
                                                         self._tts.speak(explorer.announce_page_info())
-                                                        while self._tts.is_speaking():
-                                                            time.sleep(0.05)
+                                                        self._wait_for_speech_with_interrupt()
                                                     else:
                                                         self._tts.speak("Already at first page")
-                                                        while self._tts.is_speaking():
-                                                            time.sleep(0.05)
+                                                        self._wait_for_speech_with_interrupt()
                                                 
                                                 elif block_action in ['s', 'speed']:
                                                     # Change speed
@@ -1206,25 +1203,21 @@ class AutoDebugger:
                                                             self._tts.rate_wpm = 270
                                                         else:  # medium
                                                             self._tts.rate_wpm = 210
-                                                        while self._tts.is_speaking():
-                                                            time.sleep(0.05)
+                                                        self._wait_for_speech_with_interrupt()
                                                 
                                                 elif block_action in ['q', 'quit', 'exit', 'done']:
                                                     # Exit block exploration
                                                     exploring_blocks = False
                                                     self._tts.speak("Exiting block exploration")
-                                                    while self._tts.is_speaking():
-                                                        time.sleep(0.05)
+                                                    self._wait_for_speech_with_interrupt()
                                                 
                                                 elif block_action in ['h', 'help']:
                                                     # Help
                                                     self._tts.speak("Enter 0 to 9 to select block, N for next page, P for previous page, S for speed, Q to quit")
-                                                    while self._tts.is_speaking():
-                                                        time.sleep(0.05)
+                                                    self._wait_for_speech_with_interrupt()
                                         else:
                                             self._tts.speak("No function body available")
-                                            while self._tts.is_speaking():
-                                                time.sleep(0.05)
+                                            self._wait_for_speech_with_interrupt()
                                     
                                     # Don't step after block exploration
                                     should_step_after = False
@@ -1291,21 +1284,18 @@ class AutoDebugger:
                                             # Audio announcements if enabled (only when announce_list is True)
                                             if self._tts and announce_list:
                                                 self._tts.speak(f"Changed variables, page {page + 1}. Select 0 to {len(page_vars) - 1}")
-                                                while self._tts.is_speaking():
-                                                    time.sleep(0.05)
+                                                self._wait_for_speech_with_interrupt()
                                                 for i, (_s, var_name, value) in enumerate(page_vars):
                                                     # Extract the actual value for announcement if it's a DAP structure
                                                     actual_value = value["_parsed"] if isinstance(value, dict) and "_parsed" in value else value
                                                     brief_value = format_nested_value_summary(actual_value)
                                                     self._tts.speak(f"{i}: {var_name} — {brief_value}")
-                                                    while self._tts.is_speaking():
-                                                        time.sleep(0.05)
+                                                    self._wait_for_speech_with_interrupt()
                                                 if end_idx < len(changed_vars):
                                                     self._tts.speak("Press 0 to 9 to explore, P for next page, or N to cancel")
                                                 else:
                                                     self._tts.speak("Press 0 to 9 to explore, or N to cancel")
-                                                while self._tts.is_speaking():
-                                                    time.sleep(0.05)
+                                                self._wait_for_speech_with_interrupt()
                                                 announce_list = False  # Don't announce again until page changes
 
                                             # Await selection
@@ -1339,8 +1329,7 @@ class AutoDebugger:
                                                         speed_rates = {"slow": 150, "medium": 210, "fast": 270}
                                                         self._tts.rate_wpm = speed_rates.get(new_speed, 210)
                                                         self._tts.speak(f"Speed {new_speed}")
-                                                        while self._tts.is_speaking():
-                                                            time.sleep(0.05)
+                                                        self._wait_for_speech_with_interrupt()
                                                 continue
                                             if selection == 'n' or selection == 'cancel':
                                                 exploring = False
@@ -1355,8 +1344,7 @@ class AutoDebugger:
                                                     _scope, var_name, value = page_vars[idx]
                                                     if self._tts:
                                                         self._tts.speak(f"Exploring {var_name}")
-                                                        while self._tts.is_speaking():
-                                                            time.sleep(0.05)
+                                                        self._wait_for_speech_with_interrupt()
                                                     # Explore via nested explorer if available
                                                     if self._nested_explorer:
                                                         # Read the complete structure naturally
@@ -1364,27 +1352,23 @@ class AutoDebugger:
                                                     # Just a brief prompt to indicate ready for next selection
                                                     if self._tts:
                                                         self._tts.speak("Select another or N to cancel")
-                                                        while self._tts.is_speaking():
-                                                            time.sleep(0.05)
+                                                        self._wait_for_speech_with_interrupt()
                                                 else:
                                                     if self._tts:
                                                         self._tts.speak(f"Invalid selection {selection}")
-                                                        while self._tts.is_speaking():
-                                                            time.sleep(0.05)
+                                                        self._wait_for_speech_with_interrupt()
                                             # loop continues
 
                                         if self._tts:
                                             self._tts.speak("Exploration complete")
-                                            while self._tts.is_speaking():
-                                                time.sleep(0.05)
+                                            self._wait_for_speech_with_interrupt()
                                         # Clear explore UI
                                         if self._controller:
                                             self._controller.update_state(explore_active=False, explore_mode=None, explore_items=[], explore_total=0)
                                     else:
                                         if self._tts:
                                             self._tts.speak("No changes to explore")
-                                            while self._tts.is_speaking():
-                                                time.sleep(0.05)
+                                            self._wait_for_speech_with_interrupt()
                                         # Don't auto-step after exploring; re-prompt for next action
                                         should_step_after = False
                                         continue
@@ -1431,20 +1415,17 @@ class AutoDebugger:
                                             # Audio announcements (only when announce_list is True)
                                             if self._tts and announce_list:
                                                 self._tts.speak(f"Variables list, page {page + 1}. Select 0 to {len(page_vars) - 1}")
-                                                while self._tts.is_speaking():
-                                                    time.sleep(0.05)
+                                                self._wait_for_speech_with_interrupt()
                                                 for i, (_s, var_name, value) in enumerate(page_vars):
                                                     # Value is already parsed/fetched - use directly
                                                     brief_value = format_nested_value_summary(value)
                                                     self._tts.speak(f"{i}: {var_name} — {brief_value}")
-                                                    while self._tts.is_speaking():
-                                                        time.sleep(0.05)
+                                                    self._wait_for_speech_with_interrupt()
                                                 if end_idx < len(all_vars):
                                                     self._tts.speak("Press 0 to 9 to explore, P for next page, or N to cancel")
                                                 else:
                                                     self._tts.speak("Press 0 to 9 to explore, or N to cancel")
-                                                while self._tts.is_speaking():
-                                                    time.sleep(0.05)
+                                                self._wait_for_speech_with_interrupt()
                                                 announce_list = False  # Don't announce again until page changes
 
                                             # Await selection
@@ -1478,8 +1459,7 @@ class AutoDebugger:
                                                         speed_rates = {"slow": 150, "medium": 210, "fast": 270}
                                                         self._tts.rate_wpm = speed_rates.get(new_speed, 210)
                                                         self._tts.speak(f"Speed {new_speed}")
-                                                        while self._tts.is_speaking():
-                                                            time.sleep(0.05)
+                                                        self._wait_for_speech_with_interrupt()
                                                 continue
                                             if selection == 'n' or selection == 'cancel':
                                                 exploring = False
@@ -1494,27 +1474,23 @@ class AutoDebugger:
                                                     _scope, var_name, value = page_vars[idx]
                                                     if self._tts:
                                                         self._tts.speak(f"Exploring {var_name}")
-                                                        while self._tts.is_speaking():
-                                                            time.sleep(0.05)
+                                                        self._wait_for_speech_with_interrupt()
                                                     if self._nested_explorer:
                                                         # Read the complete structure naturally
                                                         self._nested_explorer.read_complete_structure(var_name, value)
                                                     # Just a brief prompt to indicate ready for next selection
                                                     if self._tts:
                                                         self._tts.speak("Select another or N to cancel")
-                                                        while self._tts.is_speaking():
-                                                            time.sleep(0.05)
+                                                        self._wait_for_speech_with_interrupt()
                                                 else:
                                                     if self._tts:
                                                         self._tts.speak(f"Invalid selection {selection}")
-                                                        while self._tts.is_speaking():
-                                                            time.sleep(0.05)
+                                                        self._wait_for_speech_with_interrupt()
                                             # loop continues
 
                                         if self._tts:
                                             self._tts.speak("Variables exploration complete")
-                                            while self._tts.is_speaking():
-                                                time.sleep(0.05)
+                                            self._wait_for_speech_with_interrupt()
                                         if self._controller:
                                             self._controller.update_state(explore_active=False, explore_mode=None, explore_items=[], explore_total=0)
                                         # Re-prompt for next action
