@@ -330,7 +330,7 @@ class NestedValueExplorer:
             self.tts.stop()
         self.tts.speak(announcement)
         print(f"[TTS] {announcement}")
-        self._wait_for_speech()
+        # Don't wait - let the runner handle interruption checking
     
     def _format_for_detailed_speech(self, value: Any, depth: int = 0) -> str:
         """Format a value for detailed speech reading with brackets/braces.
@@ -718,8 +718,8 @@ class NestedValueExplorer:
         """Wait for TTS to finish speaking, checking for interrupts."""
         while self.tts.is_speaking():
             # Check for interrupts if action provider is available
-            if self.action_provider:
-                action = self.action_provider()
+            if self._action_provider:
+                action = self._action_provider()
                 if action == 'interrupt':
                     # Audio was already stopped by the action provider
                     return
