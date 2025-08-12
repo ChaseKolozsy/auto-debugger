@@ -115,64 +115,71 @@ def syntax_to_speech_code(code: str) -> str:
     if not code:
         return code
     
-    result = ""
-    in_string = False
-    string_char = None
-    i = 0
+    # Process line by line for multi-line code
+    lines = code.split('\n')
+    processed_lines = []
     
-    while i < len(code):
-        char = code[i]
+    for line in lines:
+        result = ""
+        in_string = False
+        string_char = None
+        i = 0
         
-        # Handle string detection to avoid replacing # inside strings
-        if char in ['"', "'"] and (i == 0 or code[i-1] != '\\'):
+        while i < len(line):
+            char = line[i]
+            
+            # Handle string detection to avoid replacing # inside strings
+            if char in ['"', "'"] and (i == 0 or line[i-1] != '\\'):
+                if not in_string:
+                    in_string = True
+                    string_char = char
+                    result += char
+                elif char == string_char:
+                    in_string = False
+                    string_char = None
+                    result += char
+                else:
+                    result += char
+                i += 1
+                continue
+            
+            # Handle comment detection (# not in string)
+            if char == '#' and not in_string:
+                # Found a comment - replace # with "comment" and include the rest of the line
+                comment_text = line[i+1:].strip()  # Get comment text after #
+                if comment_text:
+                    result += " comment " + comment_text
+                else:
+                    result += " comment"
+                break  # Stop processing this line after comment
+            
+            # Handle brackets, braces, and parentheses
             if not in_string:
-                in_string = True
-                string_char = char
-                result += char
-            elif char == string_char:
-                in_string = False
-                string_char = None
-                result += char
+                if char == '(':
+                    result += " open paren "
+                elif char == ')':
+                    result += " close paren "
+                elif char == '[':
+                    result += " open bracket "
+                elif char == ']':
+                    result += " close bracket "
+                elif char == '{':
+                    result += " open brace "
+                elif char == '}':
+                    result += " close brace "
+                else:
+                    result += char
             else:
                 result += char
+            
             i += 1
-            continue
         
-        # Handle comment detection (# not in string)
-        if char == '#' and not in_string:
-            # Found a comment - replace # with "comment" and include the rest
-            comment_text = code[i+1:].strip()  # Get comment text after #
-            if comment_text:
-                result += " comment " + comment_text
-            else:
-                result += " comment"
-            break  # Stop processing after comment
-        
-        # Handle brackets, braces, and parentheses
-        if not in_string:
-            if char == '(':
-                result += " open paren "
-            elif char == ')':
-                result += " close paren "
-            elif char == '[':
-                result += " open bracket "
-            elif char == ']':
-                result += " close bracket "
-            elif char == '{':
-                result += " open brace "
-            elif char == '}':
-                result += " close brace "
-            else:
-                result += char
-        else:
-            result += char
-        
-        i += 1
+        # Clean up multiple spaces for this line
+        result = ' '.join(result.split())
+        processed_lines.append(result)
     
-    # Clean up multiple spaces
-    result = ' '.join(result.split())
-    
-    return result
+    # Join all processed lines back together
+    return '\n'.join(processed_lines)
 
 
 def syntax_to_speech_value(value_str: str) -> str:
