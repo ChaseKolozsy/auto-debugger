@@ -1098,6 +1098,10 @@ class AutoDebugger:
                                             # Create block explorer
                                             explorer = FunctionBlockExplorer(func_body, self._tts)
                                             
+                                            # Clear any pending actions before entering exploration mode
+                                            if self._controller:
+                                                self._controller.clear_actions()
+                                            
                                             # Announce page info
                                             self._tts.speak(explorer.announce_page_info())
                                             while self._tts.is_speaking():
@@ -1108,8 +1112,8 @@ class AutoDebugger:
                                             while exploring_blocks:
                                                 # Get user input for block exploration
                                                 if self._controller:
-                                                    # Get action from web controller if available
-                                                    block_action = self._controller.shared_state.get_action(timeout=10.0)
+                                                    # Get action from web controller with shorter timeout
+                                                    block_action = self._controller.shared_state.get_action(timeout=0.5)
                                                     if not block_action:
                                                         # No input from web, get simple terminal input
                                                         print("\n[blocks] 0-9=select, n=next, p=prev, s=speed, q=quit: ", end='', flush=True)
