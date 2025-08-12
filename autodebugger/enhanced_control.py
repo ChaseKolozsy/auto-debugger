@@ -182,7 +182,8 @@ class StepControlHandler(BaseHTTPRequestHandler):
         body {
             font-family: system-ui, -apple-system, sans-serif;
             margin: 20px;
-            background: #f5f5f5;
+            background: #f9fafb;
+            color: #111827;
         }
         .container {
             max-width: 1200px;
@@ -198,10 +199,11 @@ class StepControlHandler(BaseHTTPRequestHandler):
         }
         .card {
             background: white;
-            border-radius: 8px;
-            padding: 20px;
+            border-radius: 12px;
+            padding: 24px;
             margin-bottom: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e5e7eb;
         }
         .status {
             display: grid;
@@ -265,40 +267,43 @@ class StepControlHandler(BaseHTTPRequestHandler):
             flex-wrap: wrap;
         }
         button {
-            padding: 10px 20px;
+            padding: 8px 16px;
             border-radius: 6px;
-            border: 1px solid #ccc;
+            border: 1px solid #d1d5db;
             background: white;
             cursor: pointer;
-            font-size: 16px;
+            font-size: 14px;
+            font-weight: 500;
             transition: all 0.2s;
+            color: #374151;
         }
         button:hover {
-            background: #f0f0f0;
+            background: #f3f4f6;
+            border-color: #9ca3af;
         }
         button.primary {
-            background: #007bff;
+            background: #3b82f6;
             color: white;
-            border-color: #0056b3;
+            border-color: #2563eb;
         }
         button.primary:hover {
-            background: #0056b3;
+            background: #2563eb;
         }
         button.danger {
-            background: #dc3545;
+            background: #ef4444;
             color: white;
-            border-color: #bd2130;
+            border-color: #dc2626;
         }
         button.danger:hover {
-            background: #bd2130;
+            background: #dc2626;
         }
         button.success {
-            background: #28a745;
+            background: #10b981;
             color: white;
-            border-color: #1e7e34;
+            border-color: #059669;
         }
         button.success:hover {
-            background: #1e7e34;
+            background: #059669;
         }
         button.warning {
             background: #ffc107;
@@ -355,25 +360,32 @@ class StepControlHandler(BaseHTTPRequestHandler):
             display: grid;
             grid-template-columns: minmax(100px, auto) 1fr;
             gap: 10px;
-            padding: 8px;
-            border-bottom: 1px solid #eee;
-            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+            padding: 10px;
+            margin: 4px 0;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            font-family: 'Monaco', 'Menlo', 'SF Mono', monospace;
             font-size: 13px;
+            background: #f9fafb;
+            transition: all 0.2s;
         }
         .variable-item:hover {
-            background: #f8f8f8;
+            background: #f3f4f6;
+            border-color: #d1d5db;
+            cursor: pointer;
         }
         .variable-name {
-            font-weight: bold;
-            color: #0066cc;
+            font-weight: 600;
+            color: #2563eb;
             word-break: break-word;
         }
         .variable-value {
-            color: #333;
+            color: #374151;
             word-break: break-word;
         }
         .variable-changed {
-            background: #fff3cd;
+            background: #fef3c7;
+            border-color: #fbbf24;
             animation: highlight 1s ease-out;
         }
         @keyframes highlight {
@@ -684,6 +696,16 @@ class StepControlHandler(BaseHTTPRequestHandler):
         
         async function sendAction(action) {
             try {
+                // Send stop audio command first to interrupt any playing audio
+                // (except for the stop_audio action itself to avoid recursion)
+                if (action !== 'stop_audio') {
+                    await fetch('/command', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({action: 'stop_audio'})
+                    });
+                }
+                
                 await fetch('/command', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -698,7 +720,10 @@ class StepControlHandler(BaseHTTPRequestHandler):
         
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                sendAction('stop_audio');
+            } else if (e.key === 'Enter') {
                 e.preventDefault();
                 sendAction('step');
             } else if (e.key === 'v' || e.key === 'V') {

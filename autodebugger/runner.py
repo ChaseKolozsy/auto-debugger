@@ -978,7 +978,13 @@ class AutoDebugger:
                                 # Clear the just_activated_manual flag since we've now received user input
                                 just_activated_manual = False
                                 
-                                if action == 'quit':
+                                if action == 'stop_audio':
+                                    # Stop any playing audio
+                                    if self._tts:
+                                        self._tts.stop()
+                                    should_step_after = False
+                                    continue
+                                elif action == 'quit':
                                     try:
                                         client.request("disconnect", {"terminateDebuggee": True}, wait=2.0)
                                     except Exception:
