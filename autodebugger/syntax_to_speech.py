@@ -202,6 +202,9 @@ def syntax_to_speech_code(code: str) -> str:
                         result += " comma "
                     else:
                         result += char
+                elif char == ':':
+                    # Always announce colon
+                    result += " colon "
                 else:
                     result += char
             else:
@@ -307,6 +310,9 @@ def syntax_to_speech_value(value_str: str) -> str:
             elif char == ',' and (paren_depth > 0 or bracket_depth > 0 or brace_depth > 0):
                 # Announce comma when inside a collection
                 result += " comma "
+            elif char == ':':
+                # Always announce colon (especially important for dictionaries)
+                result += " colon "
             else:
                 result += char
         else:
