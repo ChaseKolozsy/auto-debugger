@@ -25,6 +25,7 @@ if USE_ENHANCED:
         from .control import HttpStepController, prompt_for_action
 else:
     from .control import HttpStepController, prompt_for_action
+from .common import extract_function_context
 from .dap_client import DapClient
 from .db import LineReport, LineReportStore, SessionSummary
 from .audio_ui import MacSayTTS, summarize_delta
@@ -1037,41 +1038,40 @@ class AutoDebugger:
                                 elif action == 'function':
                                     # Read function context on demand
                                     if self._tts:
-                                        # Try to get function name from frame info
+                                        # First try to get from state if available
                                         func_name = None
-                                        if file_path and line:
-                                            # Simple heuristic - read function from file
-                                            try:
-                                                with open(file_path, 'r') as f:
-                                                    lines = f.readlines()
-                                                # Look backwards for def
-                                                for i in range(min(line - 1, len(lines) - 1), -1, -1):
-                                                    if lines[i].strip().startswith('def '):
-                                                        func_match = re.search(r'def\s+(\w+)', lines[i])
-                                                        if func_match:
-                                                            func_name = func_match.group(1)
-                                                            # Get full signature
-                                                            func_sig = lines[i].strip()
-                                                            # Get body (next few lines)
-                                                            func_body_lines = []
-                                                            for j in range(i + 1, min(i + 6, len(lines))):
-                                                                if lines[j].strip() and not lines[j][0].isspace():
-                                                                    break
-                                                                func_body_lines.append(lines[j].rstrip())
-                                                            func_body = '\n'.join(func_body_lines)
-                                                            
-                                                            self._tts.speak(f"In function {func_name}. Signature: {func_sig}")
-                                                            while self._tts.is_speaking():
-                                                                time.sleep(0.05)
-                                                            if func_body:
-                                                                self._tts.speak(f"Body preview: {func_body[:200]}")
-                                                                while self._tts.is_speaking():
-                                                                    time.sleep(0.05)
-                                                            break
-                                            except Exception:
-                                                pass
+                                        func_sig = None
+                                        func_body = None
                                         
-                                        if not func_name:
+                                        if self._controller and hasattr(self._controller.shared_state, 'get_state'):
+                                            state = self._controller.shared_state.get_state()
+                                            func_name = state.get('function_name')
+                                            func_sig = state.get('function_sig')
+                                            func_body = state.get('function_body')
+                                        
+                                        # If not in state, extract using common module
+                                        if not func_name and file_path and line:
+                                            func_context = extract_function_context(file_path, line)
+                                            func_name = func_context['name']
+                                            func_sig = func_context['sig']
+                                            func_body = func_context['body']
+                                        
+                                        # Announce the function info
+                                        if func_name:
+                                            self._tts.speak(f"In function {func_name}")
+                                            while self._tts.is_speaking():
+                                                time.sleep(0.05)
+                                            if func_sig:
+                                                self._tts.speak(f"Signature: {func_sig}")
+                                                while self._tts.is_speaking():
+                                                    time.sleep(0.05)
+                                            if func_body:
+                                                # Limit body preview to 200 chars for speech
+                                                body_preview = func_body[:200] + "..." if len(func_body) > 200 else func_body
+                                                self._tts.speak(f"Body preview: {body_preview}")
+                                                while self._tts.is_speaking():
+                                                    time.sleep(0.05)
+                                        else:
                                             self._tts.speak("Not currently in a function")
                                             while self._tts.is_speaking():
                                                 time.sleep(0.05)
