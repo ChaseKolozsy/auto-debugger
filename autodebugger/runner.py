@@ -1106,16 +1106,24 @@ class AutoDebugger:
                                             # Enter block selection loop
                                             exploring_blocks = True
                                             while exploring_blocks:
-                                                # Get user input
+                                                # Get user input for block exploration
                                                 if self._controller:
                                                     # Get action from web controller if available
                                                     block_action = self._controller.shared_state.get_action(timeout=10.0)
                                                     if not block_action:
-                                                        # No input from web, try terminal
-                                                        block_action = prompt_for_action(timeout=None)
+                                                        # No input from web, get simple terminal input
+                                                        print("\n[blocks] 0-9=select, n=next, p=prev, s=speed, q=quit: ", end='', flush=True)
+                                                        try:
+                                                            block_action = input().strip().lower()
+                                                        except (EOFError, KeyboardInterrupt):
+                                                            block_action = 'q'
                                                 else:
-                                                    # Terminal interface
-                                                    block_action = prompt_for_action(timeout=None)
+                                                    # Terminal interface - simple input for block exploration
+                                                    print("\n[blocks] 0-9=select, n=next, p=prev, s=speed, q=quit: ", end='', flush=True)
+                                                    try:
+                                                        block_action = input().strip().lower()
+                                                    except (EOFError, KeyboardInterrupt):
+                                                        block_action = 'q'
                                                 
                                                 if block_action and block_action.isdigit():
                                                     # Select block by number
@@ -1139,7 +1147,7 @@ class AutoDebugger:
                                                         while self._tts.is_speaking():
                                                             time.sleep(0.05)
                                                 
-                                                elif block_action in ['p', 'prev', 'previous']:
+                                                elif block_action in ['prev', 'previous'] or (block_action == 'p' and not block_action.isdigit()):
                                                     # Previous page
                                                     if explorer.previous_page():
                                                         self._tts.speak(explorer.announce_page_info())

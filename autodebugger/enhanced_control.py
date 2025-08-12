@@ -877,6 +877,8 @@ def prompt_for_action(timeout: Optional[float] = None) -> Optional[str]:
             return 'continue'
         elif response in ['q', 'quit', 'exit']:
             return 'quit'
+        elif response in ['p', 'parts']:
+            return 'parts'
         else:
             return 'step'  # Default to step
     except (EOFError, KeyboardInterrupt):

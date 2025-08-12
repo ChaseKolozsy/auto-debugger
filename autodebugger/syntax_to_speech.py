@@ -162,9 +162,9 @@ def syntax_to_speech_code(code: str) -> str:
                 # Found a comment - replace # with "comment" and include the rest of the line
                 comment_text = line[i+1:].strip()  # Get comment text after #
                 if comment_text:
-                    result += " comment " + comment_text
+                    result += " comment " + comment_text + " end of comment"
                 else:
-                    result += " comment"
+                    result += " comment end of comment"
                 break  # Stop processing this line after comment
             
             # Handle brackets, braces, and parentheses with depth tracking
