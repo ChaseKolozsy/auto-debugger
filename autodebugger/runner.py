@@ -1061,13 +1061,13 @@ class AutoDebugger:
                                             while self._tts.is_speaking():
                                                 time.sleep(0.05)
                                             if func_sig:
-                                                self._tts.speak(f"Signature: {func_sig}")
+                                                self._tts.speak(f"Signature: {func_sig}", is_code=True)
                                                 while self._tts.is_speaking():
                                                     time.sleep(0.05)
                                             if func_body:
                                                 # Read the full function body (or up to reasonable limit)
                                                 # No need to truncate further - common.py already limits to 3000 chars
-                                                self._tts.speak(f"Body: {func_body}")
+                                                self._tts.speak(f"Body: {func_body}", is_code=True)
                                                 while self._tts.is_speaking():
                                                     time.sleep(0.05)
                                         else:

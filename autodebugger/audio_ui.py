@@ -455,14 +455,14 @@ def autoplay_session(
             try:
                 sig, body = _function_signature_and_body(store, rec.get("file") or "", int(line_no or 0), repo_root, repo_commit, repo_dirty, session.session_id)
                 if sig:
-                    tts.speak(f"Function: {sig}")
+                    tts.speak(f"Function: {sig}", is_code=True)
                     while tts.is_speaking():
                         time.sleep(0.05)
                 if recite_function == "full" and body:
                     tts.speak("Body:")
                     while tts.is_speaking():
                         time.sleep(0.05)
-                    tts.speak(body)
+                    tts.speak(body, is_code=True)
                     while tts.is_speaking():
                         time.sleep(0.05)
             except Exception:
@@ -483,7 +483,7 @@ def autoplay_session(
                     try:
                         sig, _body = _function_signature_and_body(store, rec.get("file") or "", int(line_no or 0), repo_root, repo_commit, repo_dirty, session.session_id)
                         if sig:
-                            tts.speak(f"Function: {sig}")
+                            tts.speak(f"Function: {sig}", is_code=True)
                             while tts.is_speaking():
                                 time.sleep(0.05)
                         else:
@@ -499,14 +499,14 @@ def autoplay_session(
                     try:
                         sig, body = _function_signature_and_body(store, rec.get("file") or "", int(line_no or 0), repo_root, repo_commit, repo_dirty, session.session_id)
                         if sig:
-                            tts.speak(f"Function: {sig}")
+                            tts.speak(f"Function: {sig}", is_code=True)
                             while tts.is_speaking():
                                 time.sleep(0.05)
                         if body:
                             tts.speak("Body:")
                             while tts.is_speaking():
                                 time.sleep(0.05)
-                            tts.speak(body)
+                            tts.speak(body, is_code=True)
                             while tts.is_speaking():
                                 time.sleep(0.05)
                         if not sig and not body:
