@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
+from .common import extract_function_context, summarize_delta
 from .db import DEFAULT_DB_PATH, LineReportStore
 from .nested_explorer import NestedValueExplorer, format_nested_value_summary
 from .syntax_to_speech import syntax_to_speech_code, syntax_to_speech_value
@@ -220,71 +221,6 @@ def _prompt(prompt: str) -> str:
         return ""
 
 
-def summarize_delta(delta: Dict[str, Any], max_len: int = 120) -> str:
-    """Summarize variable changes for TTS announcement.
-    
-    Handles both raw DAP format and clean parsed values.
-    """
-    parts: List[str] = []
-    for key, value in delta.items():
-        # Skip internal keys
-        if key.startswith('_'):
-            continue
-            
-        # Handle scope dictionaries (Locals, Globals, etc.)
-        if isinstance(value, dict):
-            # Check if this is a scope with multiple variables
-            if all(not k.startswith('_') for k in value.keys()):
-                # This is a scope, summarize its contents
-                for var_name, var_value in value.items():
-                    if isinstance(var_value, (list, tuple)):
-                        parts.append(f"{var_name} = list of {len(var_value)}")
-                    elif isinstance(var_value, dict):
-                        # Check if it's a DAP structure or a regular dict
-                        if "value" in var_value and isinstance(var_value.get("value"), str):
-                            # Still in DAP format, just say it changed
-                            parts.append(f"{var_name} changed")
-                        else:
-                            # Clean dict
-                            parts.append(f"{var_name} = dict with {len(var_value)} keys")
-                    elif var_value is None:
-                        parts.append(f"{var_name} = None")
-                    else:
-                        s = str(var_value)
-                        if len(s) > 40:
-                            s = s[:37] + "..."
-                        parts.append(f"{var_name} = {s}")
-            else:
-                # Single variable or DAP structure
-                if "value" in value and isinstance(value.get("value"), str):
-                    # Still in DAP format
-                    parts.append(f"{key} changed")
-                else:
-                    # Clean value
-                    if isinstance(value, (list, tuple)):
-                        parts.append(f"{key} = list of {len(value)}")
-                    elif isinstance(value, dict):
-                        parts.append(f"{key} = dict with {len(value)} keys")
-                    else:
-                        s = str(value)
-                        if len(s) > 40:
-                            s = s[:37] + "..."
-                        parts.append(f"{key} = {s}")
-        elif value is None:
-            parts.append(f"{key} removed")
-        else:
-            # Simple value
-            s = str(value)
-            if len(s) > 40:
-                s = s[:37] + "..."
-            parts.append(f"{key} = {s}")
-            
-    if not parts:
-        return "no changes"
-    text = "; ".join(parts)
-    if len(text) > max_len:
-        text = text[: max_len - 3] + "..."
-    return text
 
 
 def _format_session_time(start_time_iso: str) -> str:
@@ -434,60 +370,10 @@ def _function_signature_and_body(
             source = None
     if not source:
         return None, None
-    try:
-        import ast
-        tree = ast.parse(source, filename=pyfile)
-    except Exception:
-        return None, None
-    # Find containing function with signature and body
-    sig_out: Optional[str] = None
-    body_out: Optional[str] = None
-    stack: List[str] = []
-    import ast as _ast
-
-    def _extract_sig_and_body(source_text: str, node: _ast.AST) -> tuple[str, str]:
-        try:
-            segment = _ast.get_source_segment(source_text, node) or ""
-        except Exception:
-            segment = ""
-        lines = segment.splitlines()
-        if not lines:
-            return "", ""
-        sig_lines: List[str] = []
-        for ln in lines:
-            sig_lines.append(ln)
-            if ln.rstrip().endswith(":"):
-                break
-        body_lines = lines[len(sig_lines):]
-        sig = "\n".join(sig_lines).strip()
-        body = "\n".join(body_lines).strip()
-        max_chars = 800
-        if len(body) > max_chars:
-            body = body[: max_chars - 1] + "\n…"
-        return sig, body
-
-    class Visitor(_ast.NodeVisitor):
-        def visit_ClassDef(self, node: _ast.ClassDef) -> None:  # type: ignore[override]
-            stack.append(node.name)
-            self.generic_visit(node)
-            stack.pop()
-        def visit_FunctionDef(self, node: _ast.FunctionDef) -> None:  # type: ignore[override]
-            start = getattr(node, "lineno", None)
-            end = getattr(node, "end_lineno", None)
-            if isinstance(start, int) and isinstance(end, int) and start <= line_no <= end:
-                nonlocal sig_out, body_out
-                sig_out, body_out = _extract_sig_and_body(source or "", node)
-            self.generic_visit(node)
-        def visit_AsyncFunctionDef(self, node: _ast.AsyncFunctionDef) -> None:  # type: ignore[override]
-            start = getattr(node, "lineno", None)
-            end = getattr(node, "end_lineno", None)
-            if isinstance(start, int) and isinstance(end, int) and start <= line_no <= end:
-                nonlocal sig_out, body_out
-                sig_out, body_out = _extract_sig_and_body(source or "", node)
-            self.generic_visit(node)
-
-    Visitor().visit(tree)
-    return sig_out, body_out
+    
+    # Use common function extraction
+    context = extract_function_context(pyfile, line_no, source)
+    return context["sig"], context["body"]
 
 
 def autoplay_session(

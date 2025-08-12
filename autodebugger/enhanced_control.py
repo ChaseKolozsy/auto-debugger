@@ -13,6 +13,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse, parse_qs
 
+from .common import extract_function_context
+
 
 def find_free_port() -> int:
     """Find an available port for the HTTP server."""
@@ -21,78 +23,6 @@ def find_free_port() -> int:
         return int(s.getsockname()[1])
 
 
-def extract_function_context(file_path: str, line: int) -> Dict[str, Any]:
-    """Extract function context for a given file and line - optimized version."""
-    if not file_path or not os.path.isfile(file_path):
-        return {"name": None, "sig": None, "body": None}
-    
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        
-        if line <= 0 or line > len(lines):
-            return {"name": None, "sig": None, "body": None}
-        
-        # Simple heuristic: look backwards for def/class without AST parsing
-        func_name = None
-        func_sig = None
-        func_body_lines = []
-        
-        # Start from current line and go backwards
-        for i in range(line - 1, max(-1, line - 100), -1):
-            if i < len(lines):
-                stripped = lines[i].strip()
-                # Check indentation to see if we're still in the same scope
-                if i < line - 1:
-                    # If we hit a line with no indentation (except empty lines), we're out of the function
-                    if lines[i] and not lines[i][0].isspace() and not stripped.startswith('#'):
-                        # Unless it's a decorator
-                        if not stripped.startswith('@'):
-                            break
-                
-                if stripped.startswith(('def ', 'async def ')):
-                    # Found a function definition
-                    func_sig = lines[i].rstrip()
-                    # Extract name from signature
-                    if 'def ' in stripped:
-                        name_part = stripped.split('def ', 1)[1]
-                    else:
-                        name_part = stripped.split('async def ', 1)[1]
-                    func_name = name_part.split('(')[0].strip()
-                    
-                    # Get next few lines for body
-                    for j in range(i + 1, min(i + 6, len(lines))):
-                        if j < len(lines):
-                            func_body_lines.append(lines[j].rstrip())
-                    break
-                elif stripped.startswith('class '):
-                    # Found a class definition
-                    func_sig = lines[i].rstrip()
-                    func_name = stripped.split('class ', 1)[1].split('(')[0].split(':')[0].strip()
-                    # For classes, check if we're in __init__ or another method
-                    for j in range(i + 1, min(line, i + 50)):
-                        if j < len(lines):
-                            method_stripped = lines[j].strip()
-                            if method_stripped.startswith(('def ', 'async def ')):
-                                # We might be in a method
-                                if j <= line - 1:
-                                    # Update to the method
-                                    func_sig = lines[j].rstrip()
-                                    if 'def ' in method_stripped:
-                                        method_name = method_stripped.split('def ', 1)[1].split('(')[0].strip()
-                                    else:
-                                        method_name = method_stripped.split('async def ', 1)[1].split('(')[0].strip()
-                                    func_name = f"{func_name}.{method_name}"
-                                    func_body_lines = []
-                                    for k in range(j + 1, min(j + 6, len(lines))):
-                                        func_body_lines.append(lines[k].rstrip())
-                    break
-        
-        func_body = '\n'.join(func_body_lines[:5]) if func_body_lines else None
-        return {"name": func_name, "sig": func_sig, "body": func_body}
-        
-    except Exception:
-        return {"name": None, "sig": None, "body": None}
 
 
 class SharedState:

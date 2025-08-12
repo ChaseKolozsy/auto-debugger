@@ -4,6 +4,7 @@ import os
 from typing import Optional, List, Dict, Any, Tuple
 from flask import Flask, render_template, request, redirect, url_for
 
+from .common import extract_function_context
 from .db import LineReportStore
 
 
@@ -153,38 +154,55 @@ def create_app(db_path: Optional[str] = None) -> Flask:
 
         function_maps: Dict[str, List[FnInfo]] = {}
 
-        def _extract_sig_and_body(source: str, node: ast.AST) -> Tuple[str, str]:
-            try:
-                segment = ast.get_source_segment(source, node) or ""
-            except Exception:
-                segment = ""
-            lines = segment.splitlines()
-            if not lines:
-                return "", ""
-            # Capture signature lines up to the first line ending with ':' (inclusive)
-            sig_lines: List[str] = []
-            body_lines: List[str] = []
-            found_colon = False
-            for ln in lines:
-                sig_lines.append(ln)
-                if ln.rstrip().endswith(":"):
-                    found_colon = True
-                    break
-            if found_colon:
-                body_lines = lines[len(sig_lines):]
-            else:
-                # Fallback: treat first line as signature, rest as body
-                sig_lines = [lines[0]]
-                body_lines = lines[1:]
-            sig = "\n".join(sig_lines).strip()
-            # Truncate body preview for UI friendliness
-            body = "\n".join(body_lines).strip()
-            max_chars = 1200
-            if len(body) > max_chars:
-                body = body[: max_chars - 1] + "\n…"
-            return sig, body
 
         def build_function_ranges(pyfile: str) -> List[FnInfo]:
+            infos: List[FnInfo] = []
+            try:
+                with open(pyfile, "r", encoding="utf-8") as f:
+                    source = f.read()
+                    lines = source.splitlines()
+                    
+                    # Use common extraction for each line
+                    for line_num in range(1, len(lines) + 1):
+                        context = extract_function_context(pyfile, line_num, source)
+                        if context["name"] and context["sig"]:
+                            # Check if we already have this function
+                            found = False
+                            for info in infos:
+                                if info["qual"] == context["name"] and info["start"] <= line_num <= info["end"]:
+                                    found = True
+                                    break
+                            if not found:
+                                # Add new function info
+                                infos.append({
+                                    "start": line_num,
+                                    "end": line_num,  # Will be updated
+                                    "qual": context["name"],
+                                    "sig": context["sig"],
+                                    "body": context["body"] or ""
+                                })
+            except Exception:
+                pass
+            
+            # Sort by start line
+            infos.sort(key=lambda x: x["start"])
+            
+            # Fix end lines
+            for i in range(len(infos)):
+                if i < len(infos) - 1:
+                    infos[i]["end"] = infos[i + 1]["start"] - 1
+                else:
+                    # Last function extends to end of file
+                    try:
+                        with open(pyfile, "r") as f:
+                            infos[i]["end"] = len(f.readlines())
+                    except:
+                        pass
+            
+            return infos
+
+        # Keep the original visitor pattern for compatibility but simplified
+        def build_function_ranges_ast(pyfile: str) -> List[FnInfo]:
             infos: List[FnInfo] = []
             try:
                 with open(pyfile, "r", encoding="utf-8") as f:
