@@ -5,7 +5,7 @@
   <title>AutoDebugger - Sessions</title>
   <style>
     body { font-family: system-ui, sans-serif; margin: 24px; background: #ffffff; color:#111827; }
-    header { display:flex; gap:16px; align-items:center; }
+    header { display:flex; gap:16px; align-items:center; justify-content: space-between; }
     table { border-collapse: collapse; width: 100%; margin-top: 12px; }
     th, td { border: 1px solid #ddd; padding: 8px; font-size: 14px; }
     th { background: #f7f7f7; text-align: left; }
@@ -14,12 +14,24 @@
     /* Make session id links higher contrast */
     .session-link { color: #111827; font-weight: 700; text-decoration: none; }
     .session-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+    
+    /* Checkbox styling */
+    input[type="checkbox"] { cursor: pointer; width: 18px; height: 18px; }
+    tr.selected { background-color: #f0f9ff; }
+    
+    /* Button styling */
+    .btn { padding: 8px 16px; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; font-size: 14px; }
+    .btn-primary { background: #3b82f6; color: white; }
+    .btn-success { background: #10b981; color: white; }
+    .btn-danger { background: #ef4444; color: white; }
+    .btn-danger:disabled { background: #9ca3af; cursor: not-allowed; }
 
     /* Dark mode */
     .dark body { background:#0b1020; color:#e5e7eb; }
     .dark th, .dark td { border-color: #263041; }
     .dark th { background: #0f172a; color:#e2e8f0; }
     .dark .session-link { color: #93c5fd; }
+    .dark tr.selected { background-color: #1e293b; }
   </style>
   <script>
     (function(){
@@ -32,14 +44,16 @@
   <header>
     <h2>Recent Sessions</h2>
     <div style="display: flex; gap: 10px;">
-      <a href="/sessions" style="padding: 8px 16px; background: #3b82f6; color: white; text-decoration: none; border-radius: 4px;">View All Sessions</a>
-      <a href="/launch-manual" style="padding: 8px 16px; background: #10b981; color: white; text-decoration: none; border-radius: 4px;">Launch New Session</a>
+      <button id="deleteSelected" class="btn btn-danger" disabled onclick="deleteSelected()">Delete Selected</button>
+      <a href="/sessions" class="btn btn-primary">View All Sessions</a>
+      <a href="/launch-manual" class="btn btn-success">Launch New Session</a>
     </div>
   </header>
 
-  <table>
+  <table id="sessionsTable">
     <thead>
       <tr>
+        <th><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
         <th>Session</th>
         <th>Entry</th>
         <th>Lang</th>
@@ -52,22 +66,136 @@
     </thead>
     <tbody>
       {% for s in sessions %}
-      <tr>
+      <tr data-session-id="{{s.session_id}}">
+        <td><input type="checkbox" class="session-checkbox" value="{{s.session_id}}" onchange="updateSelection()"></td>
         <td><a class="session-link" href="/session/{{s.session_id}}">{{s.session_id}}</a></td>
         <td>{{s.file}}</td>
         <td>{{s.language}}</td>
         <td class="count">{{s.total_lines_executed}}</td>
         <td class="count">{{s.total_crashes}}</td>
-        <td>{{ (s.size_bytes // 1024) }} KB</td>
+        <td>{% if s.size_bytes %}{{ (s.size_bytes // 1024) }} KB{% else %}--{% endif %}</td>
         <td>{{s.updated_at}}</td>
         <td>
           <form method="post" action="/session/{{s.session_id}}/delete" onsubmit="return confirm('Delete session {{s.session_id}}? This cannot be undone.');">
-            <button type="submit">Delete</button>
+            <button type="submit" class="btn btn-danger" style="padding: 4px 8px; font-size: 12px;">Delete</button>
           </form>
         </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  
+  <script>
+    let lastChecked = null;
+    
+    // Handle shift+click for range selection
+    document.querySelectorAll('.session-checkbox').forEach(checkbox => {
+      checkbox.addEventListener('click', function(e) {
+        if (!lastChecked) {
+          lastChecked = this;
+          return;
+        }
+        
+        if (e.shiftKey) {
+          const checkboxes = Array.from(document.querySelectorAll('.session-checkbox'));
+          const start = checkboxes.indexOf(this);
+          const end = checkboxes.indexOf(lastChecked);
+          const min = Math.min(start, end);
+          const max = Math.max(start, end);
+          
+          checkboxes.slice(min, max + 1).forEach(cb => {
+            cb.checked = lastChecked.checked;
+            cb.closest('tr').classList.toggle('selected', cb.checked);
+          });
+        }
+        
+        lastChecked = this;
+        updateSelection();
+      });
+    });
+    
+    function toggleSelectAll() {
+      const selectAll = document.getElementById('selectAll');
+      const checkboxes = document.querySelectorAll('.session-checkbox');
+      
+      checkboxes.forEach(checkbox => {
+        checkbox.checked = selectAll.checked;
+        checkbox.closest('tr').classList.toggle('selected', checkbox.checked);
+      });
+      
+      updateSelection();
+    }
+    
+    function updateSelection() {
+      const checkboxes = document.querySelectorAll('.session-checkbox:checked');
+      const deleteBtn = document.getElementById('deleteSelected');
+      const selectAll = document.getElementById('selectAll');
+      const allCheckboxes = document.querySelectorAll('.session-checkbox');
+      
+      // Update row highlighting
+      document.querySelectorAll('.session-checkbox').forEach(checkbox => {
+        checkbox.closest('tr').classList.toggle('selected', checkbox.checked);
+      });
+      
+      // Update delete button state
+      deleteBtn.disabled = checkboxes.length === 0;
+      deleteBtn.textContent = checkboxes.length > 0 
+        ? `Delete Selected (${checkboxes.length})` 
+        : 'Delete Selected';
+      
+      // Update select all checkbox state
+      if (allCheckboxes.length > 0) {
+        selectAll.checked = checkboxes.length === allCheckboxes.length;
+        selectAll.indeterminate = checkboxes.length > 0 && checkboxes.length < allCheckboxes.length;
+      }
+    }
+    
+    async function deleteSelected() {
+      const checkboxes = document.querySelectorAll('.session-checkbox:checked');
+      if (checkboxes.length === 0) return;
+      
+      const sessionIds = Array.from(checkboxes).map(cb => cb.value);
+      const plural = sessionIds.length > 1 ? 's' : '';
+      
+      if (!confirm(`Delete ${sessionIds.length} session${plural}? This cannot be undone.`)) {
+        return;
+      }
+      
+      try {
+        const response = await fetch('/sessions/delete', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: sessionIds.map(id => `session_ids[]=${encodeURIComponent(id)}`).join('&')
+        });
+        
+        if (response.ok) {
+          // Remove deleted rows from the table
+          checkboxes.forEach(cb => {
+            cb.closest('tr').remove();
+          });
+          
+          // Reset selection
+          document.getElementById('selectAll').checked = false;
+          updateSelection();
+          
+          // Show success message (optional)
+          const result = await response.json();
+          console.log(`Deleted ${result.deleted} sessions`);
+          
+          // Reload if all sessions were deleted
+          if (document.querySelectorAll('.session-checkbox').length === 0) {
+            location.reload();
+          }
+        } else {
+          alert('Failed to delete sessions. Please try again.');
+        }
+      } catch (error) {
+        console.error('Error deleting sessions:', error);
+        alert('An error occurred while deleting sessions.');
+      }
+    }
+  </script>
 </body>
 </html>
