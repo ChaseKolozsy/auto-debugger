@@ -533,6 +533,72 @@ def create_unified_app(db_path: Optional[str] = None) -> Flask:
         
         return render_template("index.html", sessions=sessions)
     
+    @app.route("/sessions")
+    def sessions():
+        """Enhanced session listing with pagination and filtering."""
+        interface.store.open()
+        conn = interface.store.conn
+        assert conn is not None
+        
+        page = int(request.args.get("page", 1))
+        per_page = 20
+        search = request.args.get("search", "")
+        
+        cur = conn.cursor()
+        
+        # Build query with optional search
+        base_query = """
+            FROM session_summaries 
+            WHERE 1=1
+        """
+        params = []
+        
+        if search:
+            base_query += " AND (session_id LIKE ? OR file LIKE ?)"
+            params.extend([f"%{search}%", f"%{search}%"])
+        
+        # Count total
+        count_query = "SELECT COUNT(*) " + base_query
+        cur.execute(count_query, params)
+        total = cur.fetchone()[0]
+        
+        # Get paginated results
+        query = f"""
+            SELECT session_id, file, language, start_time, end_time, 
+                   total_lines_executed, successful_lines, lines_with_errors, 
+                   total_crashes, updated_at 
+            {base_query}
+            ORDER BY updated_at DESC
+            LIMIT ? OFFSET ?
+        """
+        params.extend([per_page, (page - 1) * per_page])
+        cur.execute(query, params)
+        
+        rows = cur.fetchall()
+        sessions = []
+        for r in rows:
+            sessions.append({
+                "session_id": r[0],
+                "file": r[1],
+                "language": r[2],
+                "start_time": r[3],
+                "end_time": r[4],
+                "total_lines_executed": r[5],
+                "successful_lines": r[6],
+                "lines_with_errors": r[7],
+                "total_crashes": r[8],
+                "updated_at": r[9]
+            })
+        
+        total_pages = (total + per_page - 1) // per_page
+        
+        return render_template("sessions.html", 
+                             sessions=sessions, 
+                             page=page, 
+                             total_pages=total_pages,
+                             search=search,
+                             total=total)
+    
     @app.route("/session/<session_id>")
     def session_detail(session_id: str):
         interface.store.open()
@@ -616,5 +682,108 @@ def create_unified_app(db_path: Optional[str] = None) -> Flask:
         # Store in session or global state
         interface.current_speed = speed
         return jsonify({"speed": speed})
+    
+    @app.route("/session/<session_id>/delete", methods=["POST"])
+    def delete_session(session_id: str):
+        """Delete a single session."""
+        interface.store.open()
+        conn = interface.store.conn
+        assert conn is not None
+        
+        cur = conn.cursor()
+        # Delete line reports first (foreign key constraint)
+        cur.execute("DELETE FROM line_reports WHERE session_id = ?", (session_id,))
+        # Delete session summary
+        cur.execute("DELETE FROM session_summaries WHERE session_id = ?", (session_id,))
+        conn.commit()
+        
+        return redirect(url_for("sessions"))
+    
+    @app.route("/sessions/delete", methods=["POST"])
+    def delete_sessions():
+        """Delete multiple sessions."""
+        interface.store.open()
+        conn = interface.store.conn
+        assert conn is not None
+        
+        session_ids = request.form.getlist("session_ids[]")
+        if not session_ids:
+            return jsonify({"error": "No sessions selected"}), 400
+        
+        cur = conn.cursor()
+        for session_id in session_ids:
+            # Delete line reports first
+            cur.execute("DELETE FROM line_reports WHERE session_id = ?", (session_id,))
+            # Delete session summary
+            cur.execute("DELETE FROM session_summaries WHERE session_id = ?", (session_id,))
+        conn.commit()
+        
+        return jsonify({"deleted": len(session_ids), "ids": session_ids})
+    
+    @app.route("/launch-manual", methods=["GET", "POST"])
+    def launch_manual():
+        """Launch a new manual debugging session (stretch goal)."""
+        if request.method == "GET":
+            return render_template("launch_manual.html")
+        
+        # Get parameters from form
+        script_path = request.form.get("script_path", "")
+        script_args = request.form.get("script_args", "")
+        breakpoints = request.form.get("breakpoints", "")
+        
+        if not script_path:
+            return jsonify({"error": "Script path is required"}), 400
+        
+        # Parse breakpoints (format: file:line,file:line,...)
+        bp_list = []
+        if breakpoints:
+            for bp in breakpoints.split(","):
+                bp = bp.strip()
+                if ":" in bp:
+                    bp_list.append(bp)
+        
+        # Build command to launch debugger
+        import subprocess
+        import shlex
+        
+        cmd = ["python", "-m", "autodebugger", "run", "--manual"]
+        
+        # Add breakpoints
+        for bp in bp_list:
+            cmd.extend(["-b", bp])
+        
+        # Add script and its arguments
+        cmd.append(script_path)
+        if script_args:
+            cmd.extend(shlex.split(script_args))
+        
+        # Launch in background
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            
+            # Get the session ID from the output (if available)
+            # This would require parsing the debugger output
+            session_id = f"manual_{int(time.time())}"
+            
+            return jsonify({
+                "status": "launched",
+                "session_id": session_id,
+                "command": " ".join(cmd),
+                "pid": proc.pid
+            })
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    
+    @app.route("/api/sessions/active")
+    def active_sessions():
+        """Get list of currently active debugging sessions."""
+        # This would check for running debugger processes
+        # For now, return empty list
+        return jsonify({"sessions": []})
     
     return app

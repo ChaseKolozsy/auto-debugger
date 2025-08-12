@@ -30,17 +30,11 @@
 </head>
 <body>
   <header>
-    <h2>Sessions</h2>
-    <form method="get" action="/sessions">
-      <label>Filter by entry point:</label>
-      <select name="entry">
-        <option value="">All</option>
-        {% for e in entries %}
-          <option value="{{e}}">{{e}}</option>
-        {% endfor %}
-      </select>
-      <button type="submit">Apply</button>
-    </form>
+    <h2>Recent Sessions</h2>
+    <div style="display: flex; gap: 10px;">
+      <a href="/sessions" style="padding: 8px 16px; background: #3b82f6; color: white; text-decoration: none; border-radius: 4px;">View All Sessions</a>
+      <a href="/launch-manual" style="padding: 8px 16px; background: #10b981; color: white; text-decoration: none; border-radius: 4px;">Launch New Session</a>
+    </div>
   </header>
 
   <table>

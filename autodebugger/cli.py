@@ -10,7 +10,8 @@ import click
 from .runner import AutoDebugger
 from .audio_ui import run_audio_interface
 from .db import LineReportStore
-from .ui import create_app
+from .ui import create_app as create_legacy_app
+from .unified_ui import create_unified_app, UnifiedReviewInterface
 
 
 @click.group()
@@ -84,8 +85,14 @@ def export_cmd(db_path: Optional[str], session_id: str) -> None:
 @click.option("--host", default="127.0.0.1", show_default=True)
 @click.option("--port", default=5001, show_default=True, type=int)
 @click.option("--open/--no-open", "open_browser", default=True)
-def ui_cmd(db_path: Optional[str], host: str, port: int, open_browser: bool) -> None:
-    app = create_app(db_path)
+@click.option("--unified/--legacy", "use_unified", default=True, help="Use unified interface with enhanced features")
+def ui_cmd(db_path: Optional[str], host: str, port: int, open_browser: bool, use_unified: bool) -> None:
+    """Launch web UI for reviewing debug sessions."""
+    if use_unified:
+        app = create_unified_app(db_path)
+    else:
+        app = create_legacy_app(db_path)
+    
     if open_browser:
         import webbrowser
         webbrowser.open(f"http://{host}:{port}/")

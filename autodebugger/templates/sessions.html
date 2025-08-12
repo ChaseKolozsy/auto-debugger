@@ -5,48 +5,119 @@
   <title>AutoDebugger - Sessions</title>
   <style>
     body { font-family: system-ui, sans-serif; margin: 24px; background: #ffffff; color:#111827; }
-    header { display:flex; gap:16px; align-items:center; }
+    header { display:flex; gap:16px; align-items:center; flex-wrap: wrap; }
     table { border-collapse: collapse; width: 100%; margin-top: 12px; }
     th, td { border: 1px solid #ddd; padding: 8px; font-size: 14px; }
     th { background: #f7f7f7; text-align: left; }
     .count { font-weight: 600; }
     .session-link { color: #111827; font-weight: 700; text-decoration: none; }
     .session-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+    .checkbox-col { width: 40px; text-align: center; }
+    .bulk-actions { display: none; gap: 10px; padding: 10px; background: #f0f0f0; border-radius: 4px; }
+    .bulk-actions.active { display: flex; }
+    .selected-count { font-weight: bold; color: #2563eb; }
+    .btn { padding: 6px 12px; border: 1px solid #ddd; background: white; cursor: pointer; border-radius: 4px; }
+    .btn:hover { background: #f0f0f0; }
+    .btn-danger { background: #ef4444; color: white; border-color: #dc2626; }
+    .btn-danger:hover { background: #dc2626; }
+    .btn-primary { background: #3b82f6; color: white; border-color: #2563eb; }
+    .btn-primary:hover { background: #2563eb; }
+    .pagination { margin-top: 20px; display: flex; gap: 5px; align-items: center; }
+    .pagination a { padding: 5px 10px; border: 1px solid #ddd; text-decoration: none; }
+    .pagination .current { background: #3b82f6; color: white; }
+    .search-form { display: flex; gap: 10px; align-items: center; }
 
     /* Dark mode to match other pages */
     .dark body { background:#0b1020; color:#e5e7eb; }
     .dark th, .dark td { border-color: #263041; }
     .dark th { background: #0f172a; color:#e2e8f0; }
     .dark .session-link { color: #93c5fd; }
+    .dark .bulk-actions { background: #1f2937; }
+    .dark .btn { background: #374151; color: #e5e7eb; border-color: #4b5563; }
+    .dark .btn:hover { background: #4b5563; }
   </style>
   <script>
     (function(){
       const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
       if (prefersDark) document.documentElement.classList.add('dark');
     })();
+    
+    function toggleAll(source) {
+      const checkboxes = document.querySelectorAll('input[name="session_ids[]"]');
+      checkboxes.forEach(cb => cb.checked = source.checked);
+      updateBulkActions();
+    }
+    
+    function updateBulkActions() {
+      const checkboxes = document.querySelectorAll('input[name="session_ids[]"]:checked');
+      const bulkActions = document.getElementById('bulk-actions');
+      const selectedCount = document.getElementById('selected-count');
+      
+      if (checkboxes.length > 0) {
+        bulkActions.classList.add('active');
+        selectedCount.textContent = checkboxes.length;
+      } else {
+        bulkActions.classList.remove('active');
+      }
+    }
+    
+    function deleteSelected() {
+      const checkboxes = document.querySelectorAll('input[name="session_ids[]"]:checked');
+      const sessionIds = Array.from(checkboxes).map(cb => cb.value);
+      
+      if (sessionIds.length === 0) return;
+      
+      if (!confirm(`Delete ${sessionIds.length} selected session(s)? This cannot be undone.`)) {
+        return;
+      }
+      
+      fetch('/sessions/delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: sessionIds.map(id => 'session_ids[]=' + encodeURIComponent(id)).join('&')
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.deleted) {
+          location.reload();
+        }
+      })
+      .catch(error => {
+        alert('Error deleting sessions: ' + error);
+      });
+    }
   </script>
 </head>
 <body>
   <header>
-    <h2>Sessions</h2>
-    <form method="get">
-      <label>Filter by entry point:</label>
-      <input type="text" name="entry" value="{{selected_entry or ''}}" style="min-width: 320px;" />
-      <button type="submit">Apply</button>
-      <a href="/">Reset</a>
+    <h2>Sessions {% if total %}({{total}} total){% endif %}</h2>
+    <form method="get" class="search-form">
+      <label>Search:</label>
+      <input type="text" name="search" value="{{search or ''}}" placeholder="Session ID or file path" style="min-width: 320px;" />
+      <button type="submit" class="btn">Search</button>
+      <a href="/sessions" class="btn">Reset</a>
     </form>
+    <a href="/launch-manual" class="btn btn-primary">Launch New Session</a>
   </header>
+
+  <div id="bulk-actions" class="bulk-actions">
+    <span><span id="selected-count">0</span> selected</span>
+    <button onclick="deleteSelected()" class="btn btn-danger">Delete Selected</button>
+    <button onclick="document.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = false); updateBulkActions();" class="btn">Clear Selection</button>
+  </div>
 
   <table>
     <thead>
       <tr>
+        <th class="checkbox-col">
+          <input type="checkbox" onclick="toggleAll(this)" />
+        </th>
         <th>Session</th>
         <th>Entry</th>
         <th>Lang</th>
         <th>Lines</th>
         <th>Errors</th>
         <th>Crashes</th>
-        <th>Size</th>
         <th>Updated</th>
         <th>Actions</th>
       </tr>
@@ -54,22 +125,47 @@
     <tbody>
       {% for s in sessions %}
       <tr>
-        <td><a class="session-link" href="/session/{{s.session_id}}">{{s.session_id}}</a></td>
-        <td>{{s.file}}</td>
-        <td>{{s.language}}</td>
-        <td class="count">{{s.total_lines_executed}}</td>
-        <td class="count">{{s.lines_with_errors}}</td>
-        <td class="count">{{s.total_crashes}}</td>
-        <td>{{ (s.size_bytes // 1024) }} KB</td>
-        <td>{{s.updated_at}}</td>
+        <td class="checkbox-col">
+          <input type="checkbox" name="session_ids[]" value="{{s.session_id}}" onchange="updateBulkActions()" />
+        </td>
+        <td><a class="session-link" href="/session/{{s.session_id}}">{{s.session_id[:16]}}...</a></td>
+        <td title="{{s.file}}">{{s.file|truncate(40)}}</td>
+        <td>{{s.language or 'py'}}</td>
+        <td class="count">{{s.total_lines_executed or 0}}</td>
+        <td class="count">{{s.lines_with_errors or 0}}</td>
+        <td class="count">{{s.total_crashes or 0}}</td>
+        <td>{{s.updated_at|truncate(19, killwords=True, end='')}}</td>
         <td>
-          <form method="post" action="/session/{{s.session_id}}/delete" onsubmit="return confirm('Delete session {{s.session_id}}? This cannot be undone.');">
-            <button type="submit">Delete</button>
+          <form method="post" action="/session/{{s.session_id}}/delete" style="display:inline;" onsubmit="return confirm('Delete session {{s.session_id[:16]}}? This cannot be undone.');">
+            <button type="submit" class="btn">Delete</button>
           </form>
+          <a href="/session/{{s.session_id}}" class="btn">View</a>
         </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+
+  {% if total_pages and total_pages > 1 %}
+  <div class="pagination">
+    {% if page > 1 %}
+      <a href="?page={{page-1}}&search={{search or ''}}">← Previous</a>
+    {% endif %}
+    
+    {% for p in range(1, total_pages + 1) %}
+      {% if p == page %}
+        <span class="current">{{p}}</span>
+      {% elif p == 1 or p == total_pages or (p >= page - 2 and p <= page + 2) %}
+        <a href="?page={{p}}&search={{search or ''}}">{{p}}</a>
+      {% elif p == page - 3 or p == page + 3 %}
+        <span>...</span>
+      {% endif %}
+    {% endfor %}
+    
+    {% if page < total_pages %}
+      <a href="?page={{page+1}}&search={{search or ''}}">Next →</a>
+    {% endif %}
+  </div>
+  {% endif %}
 </body>
 </html>
