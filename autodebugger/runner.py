@@ -1357,8 +1357,6 @@ class AutoDebugger:
                                                     if self._tts:
                                                         # Stop any current audio before starting new selection
                                                         self._tts.stop()
-                                                        self._tts.speak(f"Exploring {var_name}")
-                                                        self._wait_for_speech_with_interrupt()
                                                     # Explore via nested explorer if available
                                                     if self._nested_explorer:
                                                         # Read the complete structure naturally
