@@ -25,11 +25,11 @@ if USE_ENHANCED:
         from .control import HttpStepController, prompt_for_action
 else:
     from .control import HttpStepController, prompt_for_action
-from .common import extract_function_context
+from .common import extract_function_context, summarize_value, summarize_delta
 from .function_blocks import FunctionBlockExplorer
 from .dap_client import DapClient
 from .db import LineReport, LineReportStore, SessionSummary
-from .audio_ui import MacSayTTS, summarize_delta
+from .audio_ui import MacSayTTS
 from .nested_explorer import NestedValueExplorer, format_nested_value_summary
 from .syntax_to_speech import syntax_to_speech_code
 
