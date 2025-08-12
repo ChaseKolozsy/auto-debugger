@@ -1301,7 +1301,7 @@ class AutoDebugger:
 
                                             # Audio announcements if enabled (only when announce_list is True)
                                             if self._tts and announce_list:
-                                                self._tts.speak(f"Changed variables, page {page + 1}. Select 0 to {len(page_vars) - 1}")
+                                                self._tts.speak(f"Changed variables, page {page + 1}. Select 0 to {len(page_vars) - 1}", interrupt=True)
                                                 # Don't wait - allow immediate selection
                                                 for i, (_s, var_name, value) in enumerate(page_vars):
                                                     # Check if we should stop announcing
@@ -1314,11 +1314,11 @@ class AutoDebugger:
                                                     # Extract the actual value for announcement if it's a DAP structure
                                                     actual_value = value["_parsed"] if isinstance(value, dict) and "_parsed" in value else value
                                                     brief_value = format_nested_value_summary(actual_value)
-                                                    self._tts.speak(f"{i}: {var_name} — {brief_value}")
+                                                    self._tts.speak(f"{i}: {var_name} — {brief_value}", interrupt=True)
                                                 if end_idx < len(changed_vars):
-                                                    self._tts.speak("Press 0 to 9 to explore, P for next page, or N to cancel")
+                                                    self._tts.speak("Press 0 to 9 to explore, P for next page, or N to cancel", interrupt=True)
                                                 else:
-                                                    self._tts.speak("Press 0 to 9 to explore, or N to cancel")
+                                                    self._tts.speak("Press 0 to 9 to explore, or N to cancel", interrupt=True)
                                                 announce_list = False  # Don't announce again until page changes
 
                                             # Await selection
@@ -1377,7 +1377,7 @@ class AutoDebugger:
                                                         self._nested_explorer.read_complete_structure(var_name, value)
                                                     # Just a brief prompt to indicate ready for next selection
                                                     if self._tts:
-                                                        self._tts.speak("Select another or N to cancel")
+                                                        self._tts.speak("Select another or N to cancel", interrupt=True)
                                                         # Don't wait - allow immediate next selection
                                                 else:
                                                     if self._tts:
@@ -1440,7 +1440,7 @@ class AutoDebugger:
 
                                             # Audio announcements (only when announce_list is True)
                                             if self._tts and announce_list:
-                                                self._tts.speak(f"Variables list, page {page + 1}. Select 0 to {len(page_vars) - 1}")
+                                                self._tts.speak(f"Variables list, page {page + 1}. Select 0 to {len(page_vars) - 1}", interrupt=True)
                                                 # Don't wait - allow immediate selection
                                                 for i, (_s, var_name, value) in enumerate(page_vars):
                                                     # Check if we should stop announcing
@@ -1452,11 +1452,11 @@ class AutoDebugger:
                                                             break
                                                     # Value is already parsed/fetched - use directly
                                                     brief_value = format_nested_value_summary(value)
-                                                    self._tts.speak(f"{i}: {var_name} — {brief_value}")
+                                                    self._tts.speak(f"{i}: {var_name} — {brief_value}", interrupt=True)
                                                 if end_idx < len(all_vars):
-                                                    self._tts.speak("Press 0 to 9 to explore, P for next page, or N to cancel")
+                                                    self._tts.speak("Press 0 to 9 to explore, P for next page, or N to cancel", interrupt=True)
                                                 else:
-                                                    self._tts.speak("Press 0 to 9 to explore, or N to cancel")
+                                                    self._tts.speak("Press 0 to 9 to explore, or N to cancel", interrupt=True)
                                                 announce_list = False  # Don't announce again until page changes
 
                                             # Await selection
@@ -1514,7 +1514,7 @@ class AutoDebugger:
                                                         self._nested_explorer.read_complete_structure(var_name, value)
                                                     # Just a brief prompt to indicate ready for next selection
                                                     if self._tts:
-                                                        self._tts.speak("Select another or N to cancel")
+                                                        self._tts.speak("Select another or N to cancel", interrupt=True)
                                                         # Don't wait - allow immediate next selection
                                                 else:
                                                     if self._tts:
