@@ -924,13 +924,35 @@ class AutoDebugger:
                                 if variables_delta:
                                     # Extract clean values for TTS announcement
                                     clean_delta = self._extract_display_values(variables_delta)
-                                    delta_summary = summarize_delta(clean_delta)
-                                    if delta_summary and delta_summary != "no changes":
-                                        self._tts.speak(f"Changes: {delta_summary}")
-                                        print(f"[TTS] Changes: {delta_summary}")
-                                        # Wait for changes announcement to finish
+                                    
+                                    # Count total changes
+                                    total_changes = 0
+                                    change_parts = []
+                                    
+                                    for scope_name, scope_vars in clean_delta.items():
+                                        if isinstance(scope_vars, dict) and not scope_name.startswith('_'):
+                                            for var_name, var_value in scope_vars.items():
+                                                if not var_name.startswith('_'):
+                                                    total_changes += 1
+                                                    # Use summarize_value for each individual value
+                                                    summary = summarize_value(var_value, 60)
+                                                    change_parts.append(f"{var_name} = {summary}")
+                                    
+                                    if change_parts:
+                                        # Announce number of changes first
+                                        if total_changes == 1:
+                                            self._tts.speak(f"1 change:")
+                                        else:
+                                            self._tts.speak(f"{total_changes} changes:")
                                         while self._tts.is_speaking():
                                             time.sleep(0.05)
+                                        
+                                        # Then announce each change
+                                        for change in change_parts:
+                                            self._tts.speak(change)
+                                            print(f"[TTS] {change}")
+                                            while self._tts.is_speaking():
+                                                time.sleep(0.05)
                             
                             # Loop while at this stopped event to allow multiple actions
                             while True:
