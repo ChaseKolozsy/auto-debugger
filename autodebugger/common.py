@@ -69,8 +69,8 @@ def _extract_function_context_ast(tree: ast.AST, source: str, line: int) -> Dict
         sig = "\n".join(sig_lines).strip()
         body = "\n".join(body_lines).strip()
         
-        # Truncate body for UI friendliness
-        max_chars = 1200
+        # Truncate body for UI friendliness (but keep reasonable amount)
+        max_chars = 3000  # Increased from 1200 to allow fuller function bodies
         if len(body) > max_chars:
             body = body[:max_chars - 1] + "\n…"
         
@@ -142,9 +142,20 @@ def _extract_function_context_heuristic(source: str, line: int) -> Dict[str, Any
                     name_part = stripped.split('async def ', 1)[1]
                 func_name = name_part.split('(')[0].strip()
                 
-                # Get next few lines for body
-                for j in range(i + 1, min(i + 6, len(lines))):
+                # Get function body - collect until we hit the next function/class or end of indentation
+                base_indent = len(lines[i]) - len(lines[i].lstrip()) if i < len(lines) else 0
+                for j in range(i + 1, min(i + 100, len(lines))):  # Check up to 100 lines
                     if j < len(lines):
+                        current_line = lines[j]
+                        if current_line.strip():  # Non-empty line
+                            current_indent = len(current_line) - len(current_line.lstrip())
+                            # Stop if we hit a line with same or less indentation (except decorators/comments)
+                            if current_indent <= base_indent and not current_line.strip().startswith(('@', '#')):
+                                break
+                            # Stop if we hit another function/class definition at the same level
+                            stripped_line = current_line.strip()
+                            if stripped_line.startswith(('def ', 'async def ', 'class ')) and current_indent <= base_indent + 4:
+                                break
                         func_body_lines.append(lines[j].rstrip())
                 break
             
@@ -165,11 +176,25 @@ def _extract_function_context_heuristic(source: str, line: int) -> Dict[str, Any
                                     method_name = method_stripped.split('async def ', 1)[1].split('(')[0].strip()
                                 func_name = f"{func_name}.{method_name}"
                                 func_body_lines = []
-                                for k in range(j + 1, min(j + 6, len(lines))):
-                                    func_body_lines.append(lines[k].rstrip())
+                                method_indent = len(lines[j]) - len(lines[j].lstrip()) if j < len(lines) else 0
+                                for k in range(j + 1, min(j + 100, len(lines))):  # Check up to 100 lines
+                                    if k < len(lines):
+                                        current_line = lines[k]
+                                        if current_line.strip():  # Non-empty line
+                                            current_indent = len(current_line) - len(current_line.lstrip())
+                                            # Stop if we hit a line with same or less indentation
+                                            if current_indent <= method_indent and not current_line.strip().startswith(('@', '#')):
+                                                break
+                                            # Stop if we hit another function/class definition
+                                            if current_line.strip().startswith(('def ', 'async def ', 'class ')):
+                                                break
+                                        func_body_lines.append(lines[k].rstrip())
                 break
     
-    func_body = '\n'.join(func_body_lines[:5]) if func_body_lines else None
+    # Join all body lines and apply the same truncation as AST method
+    func_body = '\n'.join(func_body_lines) if func_body_lines else None
+    if func_body and len(func_body) > 3000:
+        func_body = func_body[:2999] + '\n…'
     return {"name": func_name, "sig": func_sig, "body": func_body}
 
 

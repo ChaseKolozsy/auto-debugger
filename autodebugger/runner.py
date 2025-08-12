@@ -871,9 +871,8 @@ class AutoDebugger:
                                     if func_sig:
                                         announcement += f"Signature: {func_sig}. "
                                     if func_body:
-                                        # Limit body length
-                                        if len(func_body) > 150:
-                                            func_body = func_body[:150] + "..."
+                                        # Don't truncate too aggressively - allow reasonable function bodies
+                                        # The extraction already limits to 3000 chars
                                         announcement += f"Body: {func_body}. "
                                     announcement += f"Line {line}: {code}"
                                 else:
@@ -1066,9 +1065,9 @@ class AutoDebugger:
                                                 while self._tts.is_speaking():
                                                     time.sleep(0.05)
                                             if func_body:
-                                                # Limit body preview to 200 chars for speech
-                                                body_preview = func_body[:200] + "..." if len(func_body) > 200 else func_body
-                                                self._tts.speak(f"Body preview: {body_preview}")
+                                                # Read the full function body (or up to reasonable limit)
+                                                # No need to truncate further - common.py already limits to 3000 chars
+                                                self._tts.speak(f"Body: {func_body}")
                                                 while self._tts.is_speaking():
                                                     time.sleep(0.05)
                                         else:
