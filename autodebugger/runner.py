@@ -1302,18 +1302,23 @@ class AutoDebugger:
                                             # Audio announcements if enabled (only when announce_list is True)
                                             if self._tts and announce_list:
                                                 self._tts.speak(f"Changed variables, page {page + 1}. Select 0 to {len(page_vars) - 1}")
-                                                self._wait_for_speech_with_interrupt()
+                                                # Don't wait - allow immediate selection
                                                 for i, (_s, var_name, value) in enumerate(page_vars):
+                                                    # Check if we should stop announcing
+                                                    if self._controller:
+                                                        action = self._controller.wait_for_action(0.01)
+                                                        if action:
+                                                            # Put it back and break out of announcements
+                                                            self._controller.shared_state.send_action(action)
+                                                            break
                                                     # Extract the actual value for announcement if it's a DAP structure
                                                     actual_value = value["_parsed"] if isinstance(value, dict) and "_parsed" in value else value
                                                     brief_value = format_nested_value_summary(actual_value)
                                                     self._tts.speak(f"{i}: {var_name} — {brief_value}")
-                                                    self._wait_for_speech_with_interrupt()
                                                 if end_idx < len(changed_vars):
                                                     self._tts.speak("Press 0 to 9 to explore, P for next page, or N to cancel")
                                                 else:
                                                     self._tts.speak("Press 0 to 9 to explore, or N to cancel")
-                                                self._wait_for_speech_with_interrupt()
                                                 announce_list = False  # Don't announce again until page changes
 
                                             # Await selection
@@ -1373,11 +1378,11 @@ class AutoDebugger:
                                                     # Just a brief prompt to indicate ready for next selection
                                                     if self._tts:
                                                         self._tts.speak("Select another or N to cancel")
-                                                        self._wait_for_speech_with_interrupt()
+                                                        # Don't wait - allow immediate next selection
                                                 else:
                                                     if self._tts:
                                                         self._tts.speak(f"Invalid selection {selection}")
-                                                        self._wait_for_speech_with_interrupt()
+                                                        # Don't wait - allow immediate retry
                                             # loop continues
 
                                         if self._tts:
@@ -1436,17 +1441,22 @@ class AutoDebugger:
                                             # Audio announcements (only when announce_list is True)
                                             if self._tts and announce_list:
                                                 self._tts.speak(f"Variables list, page {page + 1}. Select 0 to {len(page_vars) - 1}")
-                                                self._wait_for_speech_with_interrupt()
+                                                # Don't wait - allow immediate selection
                                                 for i, (_s, var_name, value) in enumerate(page_vars):
+                                                    # Check if we should stop announcing
+                                                    if self._controller:
+                                                        action = self._controller.wait_for_action(0.01)
+                                                        if action:
+                                                            # Put it back and break out of announcements
+                                                            self._controller.shared_state.send_action(action)
+                                                            break
                                                     # Value is already parsed/fetched - use directly
                                                     brief_value = format_nested_value_summary(value)
                                                     self._tts.speak(f"{i}: {var_name} — {brief_value}")
-                                                    self._wait_for_speech_with_interrupt()
                                                 if end_idx < len(all_vars):
                                                     self._tts.speak("Press 0 to 9 to explore, P for next page, or N to cancel")
                                                 else:
                                                     self._tts.speak("Press 0 to 9 to explore, or N to cancel")
-                                                self._wait_for_speech_with_interrupt()
                                                 announce_list = False  # Don't announce again until page changes
 
                                             # Await selection
@@ -1505,11 +1515,11 @@ class AutoDebugger:
                                                     # Just a brief prompt to indicate ready for next selection
                                                     if self._tts:
                                                         self._tts.speak("Select another or N to cancel")
-                                                        self._wait_for_speech_with_interrupt()
+                                                        # Don't wait - allow immediate next selection
                                                 else:
                                                     if self._tts:
                                                         self._tts.speak(f"Invalid selection {selection}")
-                                                        self._wait_for_speech_with_interrupt()
+                                                        # Don't wait - allow immediate retry
                                             # loop continues
 
                                         if self._tts:
