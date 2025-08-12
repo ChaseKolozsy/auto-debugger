@@ -26,6 +26,7 @@ if USE_ENHANCED:
 else:
     from .control import HttpStepController, prompt_for_action
 from .common import extract_function_context
+from .function_blocks import FunctionBlockExplorer
 from .dap_client import DapClient
 from .db import LineReport, LineReportStore, SessionSummary
 from .audio_ui import MacSayTTS, summarize_delta
@@ -352,7 +353,7 @@ class AutoDebugger:
             
             # Give initial instructions if starting in manual mode
             if manual_mode_active:
-                self._tts.speak("Manual mode. Press V for variables, F for function, E to explore changes when available")
+                self._tts.speak("Manual mode. Press V for variables, F for function, P for function parts, E to explore changes")
                 while self._tts.is_speaking():
                     time.sleep(0.05)
                 exploration_instructions_given = True
@@ -667,7 +668,7 @@ class AutoDebugger:
                                         
                                         # Give instructions when activating manual mode
                                         if self._tts and not exploration_instructions_given:
-                                            self._tts.speak(f"Manual mode activated. Press V for variables, F for function, E to explore changes")
+                                            self._tts.speak(f"Manual mode activated. Press V for variables, F for function, P for function parts, E to explore")
                                             while self._tts.is_speaking():
                                                 time.sleep(0.05)
                                             exploration_instructions_given = True
@@ -1077,6 +1078,105 @@ class AutoDebugger:
                                         # After speaking function context, re-prompt for another action
                                         should_step_after = False
                                         continue
+                                elif action == 'parts' or action == 'p':
+                                    # Function block exploration mode
+                                    if self._tts:
+                                        # Get function body
+                                        func_body = None
+                                        
+                                        # First try to get from state if available
+                                        if self._controller and hasattr(self._controller.shared_state, 'get_state'):
+                                            state = self._controller.shared_state.get_state()
+                                            func_body = state.get('function_body')
+                                        
+                                        # If not in state, extract using common module
+                                        if not func_body and file_path and line:
+                                            func_context = extract_function_context(file_path, line)
+                                            func_body = func_context['body']
+                                        
+                                        if func_body:
+                                            # Create block explorer
+                                            explorer = FunctionBlockExplorer(func_body, self._tts)
+                                            
+                                            # Announce page info
+                                            self._tts.speak(explorer.announce_page_info())
+                                            while self._tts.is_speaking():
+                                                time.sleep(0.05)
+                                            
+                                            # Enter block selection loop
+                                            exploring_blocks = True
+                                            while exploring_blocks:
+                                                # Get user input
+                                                block_action = prompt_for_action(self._controller, timeout=None)
+                                                
+                                                if block_action and block_action.isdigit():
+                                                    # Select block by number
+                                                    block_idx = int(block_action)
+                                                    block = explorer.select_block(block_idx)
+                                                    if block:
+                                                        explorer.speak_block(block)
+                                                    else:
+                                                        self._tts.speak("Invalid block number")
+                                                        while self._tts.is_speaking():
+                                                            time.sleep(0.05)
+                                                
+                                                elif block_action in ['n', 'next']:
+                                                    # Next page
+                                                    if explorer.next_page():
+                                                        self._tts.speak(explorer.announce_page_info())
+                                                        while self._tts.is_speaking():
+                                                            time.sleep(0.05)
+                                                    else:
+                                                        self._tts.speak("Already at last page")
+                                                        while self._tts.is_speaking():
+                                                            time.sleep(0.05)
+                                                
+                                                elif block_action in ['p', 'prev', 'previous']:
+                                                    # Previous page
+                                                    if explorer.previous_page():
+                                                        self._tts.speak(explorer.announce_page_info())
+                                                        while self._tts.is_speaking():
+                                                            time.sleep(0.05)
+                                                    else:
+                                                        self._tts.speak("Already at first page")
+                                                        while self._tts.is_speaking():
+                                                            time.sleep(0.05)
+                                                
+                                                elif block_action in ['s', 'speed']:
+                                                    # Change speed
+                                                    if self._controller and hasattr(self._controller.shared_state, 'cycle_audio_speed'):
+                                                        new_speed = self._controller.shared_state.cycle_audio_speed()
+                                                        self._tts.speak(f"Speed set to {new_speed}")
+                                                        # Update TTS rate
+                                                        if new_speed == "slow":
+                                                            self._tts.rate_wpm = 150
+                                                        elif new_speed == "fast":
+                                                            self._tts.rate_wpm = 270
+                                                        else:  # medium
+                                                            self._tts.rate_wpm = 210
+                                                        while self._tts.is_speaking():
+                                                            time.sleep(0.05)
+                                                
+                                                elif block_action in ['q', 'quit', 'exit', 'done']:
+                                                    # Exit block exploration
+                                                    exploring_blocks = False
+                                                    self._tts.speak("Exiting block exploration")
+                                                    while self._tts.is_speaking():
+                                                        time.sleep(0.05)
+                                                
+                                                elif block_action in ['h', 'help']:
+                                                    # Help
+                                                    self._tts.speak("Enter 0 to 9 to select block, N for next page, P for previous page, S for speed, Q to quit")
+                                                    while self._tts.is_speaking():
+                                                        time.sleep(0.05)
+                                        else:
+                                            self._tts.speak("No function body available")
+                                            while self._tts.is_speaking():
+                                                time.sleep(0.05)
+                                    
+                                    # Don't step after block exploration
+                                    should_step_after = False
+                                    continue
                                 elif action == 'explore':
                                     # Interactive exploration with numbered selection
                                     # Compute changed variables by scope for UI and selection

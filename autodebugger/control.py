@@ -249,6 +249,7 @@ class StepControlHandler(BaseHTTPRequestHandler):
                 <button class="primary" onclick="sendAction('step')">Step (Enter)</button>
                 <button onclick="sendAction('variables')">Variables (V)</button>
                 <button onclick="sendAction('function')">Function (F)</button>
+                <button onclick="sendAction('parts')">Function Parts (P)</button>
                 <button onclick="sendAction('explore')">Explore Changes (E)</button>
                 <button onclick="sendAction('variables_explore')">Explore Variables (W)</button>
                 <button class="success" onclick="sendAction('auto')">Auto Mode (A)</button>
@@ -330,6 +331,8 @@ class StepControlHandler(BaseHTTPRequestHandler):
                 sendAction('variables');
             } else if (e.key === 'f' || e.key === 'F') {
                 sendAction('function');
+            } else if (e.key === 'p' || e.key === 'P') {
+                sendAction('parts');
             } else if (e.key === 'e' || e.key === 'E') {
                 sendAction('explore');
             } else if (e.key === 'w' || e.key === 'W') {
