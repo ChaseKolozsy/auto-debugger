@@ -883,6 +883,9 @@
         const data = await response.json();
         currentVariables = data.variables;
         
+        // Speak the summary first
+        await fetch(`/api/session/${sessionId}/line/${lineId}/variables?speak=true&mode=summary`);
+        
         // Reset state
         variableExplorerMode = 'scopes';
         selectedScope = null;
@@ -892,6 +895,21 @@
         // Display the modal
         document.getElementById('variable-modal').style.display = 'block';
         displayVariableScopesOrVars();
+        
+        // Announce navigation instructions
+        announceNavigationInstructions();
+      }
+      
+      async function announceNavigationInstructions() {
+        // Announce how to navigate
+        await fetch('/api/tts/speak', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            text: "Press 0 through 9 to select a scope. Press Q to quit.",
+            interrupt: false
+          })
+        });
       }
       
       function displayVariableScopesOrVars() {
@@ -946,7 +964,7 @@
         }
       }
       
-      function selectScope(scopeName) {
+      async function selectScope(scopeName) {
         selectedScope = scopeName;
         variableExplorerMode = 'variables';
         
@@ -960,6 +978,20 @@
             }
           }
         }
+        
+        // Announce scope and count
+        const totalPages = Math.ceil(allVariables.length / varsPerPage);
+        let announcement = `${scopeName} scope. ${allVariables.length} variables.`;
+        if (totalPages > 1) {
+          announcement += ` Page 1 of ${totalPages}. Press N for next page, P for previous.`;
+        }
+        announcement += " Press 0 through 9 to hear a variable. Press B to go back to scopes.";
+        
+        await fetch('/api/tts/speak', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({text: announcement, interrupt: true})
+        });
         
         // Reset pagination for variables
         currentVarPage = 0;
@@ -1087,15 +1119,17 @@
         lastSpokenVariable = {scope, varName, lineId};
         
         // Navigate to the variable in the scope
-        const path = [scope];
+        const path = scope ? [scope] : [];
         
+        // This will speak the actual value, not just summary
         await fetch(`/api/session/${sessionId}/line/${lineId}/explore`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
             variable: varName,
             path: path,
-            speak: true
+            speak: true,
+            is_changes: false
           })
         });
       }
@@ -1131,6 +1165,9 @@
           return;
         }
         
+        // Speak the changes summary first
+        await fetch(`/api/session/${sessionId}/line/${lineId}/variables?speak=true&mode=changes`);
+        
         // Reset state
         changesExplorerMode = 'scopes';
         selectedChangesScope = null;
@@ -1140,6 +1177,16 @@
         // Display the modal
         document.getElementById('changes-modal').style.display = 'block';
         displayChangesScopesOrChanges();
+        
+        // Announce navigation instructions
+        await fetch('/api/tts/speak', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            text: "Press 0 through 9 to select a scope with changes. Press Q to quit.",
+            interrupt: false
+          })
+        });
       }
       
       function displayChangesScopesOrChanges() {
@@ -1196,7 +1243,7 @@
         }
       }
       
-      function selectChangesScope(scopeName) {
+      async function selectChangesScope(scopeName) {
         selectedChangesScope = scopeName;
         changesExplorerMode = 'changes';
         
@@ -1210,6 +1257,20 @@
             }
           }
         }
+        
+        // Announce scope and count
+        const totalPages = Math.ceil(allChanges.length / changesPerPage);
+        let announcement = `${scopeName} scope. ${allChanges.length} changes.`;
+        if (totalPages > 1) {
+          announcement += ` Page 1 of ${totalPages}. Press N for next page, P for previous.`;
+        }
+        announcement += " Press 0 through 9 to hear a change. Press B to go back to scopes.";
+        
+        await fetch('/api/tts/speak', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({text: announcement, interrupt: true})
+        });
         
         // Reset pagination for changes
         currentChangesPage = 0;

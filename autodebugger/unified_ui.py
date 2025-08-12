@@ -969,6 +969,20 @@ def create_unified_app(db_path: Optional[str] = None) -> Flask:
             interface.tts.stop()
         return jsonify({"status": "stopped"})
     
+    @app.route("/api/tts/speak", methods=["POST"])
+    def speak_text():
+        """Speak arbitrary text."""
+        text = request.json.get("text", "")
+        interrupt = request.json.get("interrupt", True)
+        
+        if not interface.tts:
+            interface.tts = AudioTTS(verbose=True)
+        
+        if text:
+            interface.tts.speak(text, interrupt=interrupt)
+        
+        return jsonify({"status": "speaking", "text": text})
+    
     @app.route("/api/tts/speed", methods=["POST"])
     def set_tts_speed():
         """Set TTS speed."""
