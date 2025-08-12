@@ -127,6 +127,7 @@ def syntax_to_speech_code(code: str) -> str:
     for line in lines:
         result = ""
         in_string = False
+        in_f_string = False
         string_char = None
         i = 0
         
@@ -142,6 +143,15 @@ def syntax_to_speech_code(code: str) -> str:
         while i < len(line):
             char = line[i]
             
+            # Check for f-string start (f" or f')
+            if not in_string and i > 0 and line[i-1] == 'f' and char in ['"', "'"]:
+                in_string = True
+                in_f_string = True
+                string_char = char
+                result += char
+                i += 1
+                continue
+            
             # Handle string detection to avoid replacing # inside strings
             if char in ['"', "'"] and (i == 0 or line[i-1] != '\\'):
                 if not in_string:
@@ -150,6 +160,7 @@ def syntax_to_speech_code(code: str) -> str:
                     result += char
                 elif char == string_char:
                     in_string = False
+                    in_f_string = False
                     string_char = None
                     result += char
                 else:
@@ -167,7 +178,46 @@ def syntax_to_speech_code(code: str) -> str:
                     result += " comment end of comment"
                 break  # Stop processing this line after comment
             
-            # Handle brackets, braces, and parentheses with depth tracking
+            # Handle f-string interpolation braces specially
+            if in_f_string and char == '{':
+                # Check if it's an escape {{ 
+                if i + 1 < len(line) and line[i + 1] == '{':
+                    result += '{{'
+                    i += 2
+                    continue
+                else:
+                    # It's an f-string interpolation - process the expression inside
+                    result += " open f brace "
+                    i += 1
+                    # Find the matching close brace
+                    expr_start = i
+                    depth = 1
+                    while i < len(line) and depth > 0:
+                        if line[i] == '{':
+                            depth += 1
+                        elif line[i] == '}':
+                            depth -= 1
+                            if depth == 0:
+                                # Process the expression inside as code
+                                expr = line[expr_start:i]
+                                # Recursively process the expression as code
+                                processed_expr = syntax_to_speech_code(expr).strip()
+                                result += processed_expr + " close f brace "
+                                i += 1
+                                break
+                        i += 1
+                    continue
+            
+            # Handle escaped closing braces in f-strings
+            if in_f_string and char == '}':
+                # Check if it's an escape }}
+                if i + 1 < len(line) and line[i + 1] == '}':
+                    result += '}}'
+                    i += 2
+                    continue
+                # Otherwise it's handled by the f-string interpolation above
+            
+            # Handle regular brackets, braces, and parentheses with depth tracking
             if not in_string:
                 if char == '(':
                     paren_depth += 1
