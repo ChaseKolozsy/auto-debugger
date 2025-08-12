@@ -101,16 +101,16 @@ def syntax_to_speech(text: str, include_operators: bool = True) -> str:
 
 def syntax_to_speech_code(code: str) -> str:
     """
-    Convert code syntax to natural language, optimized for code reading.
+    Convert code syntax to natural language with depth tracking.
     
     This version is specifically for reading code lines and includes
-    more contextual processing.
+    depth tracking for nested structures.
     
     Args:
         code: A line or block of code
         
     Returns:
-        Code with syntax converted to speakable format
+        Code with syntax converted to speakable format including depth levels
     """
     if not code:
         return code
@@ -118,6 +118,11 @@ def syntax_to_speech_code(code: str) -> str:
     # Process line by line for multi-line code
     lines = code.split('\n')
     processed_lines = []
+    
+    # Track depth across lines (for multi-line structures)
+    paren_depth = 0
+    bracket_depth = 0
+    brace_depth = 0
     
     for line in lines:
         result = ""
@@ -153,20 +158,35 @@ def syntax_to_speech_code(code: str) -> str:
                     result += " comment"
                 break  # Stop processing this line after comment
             
-            # Handle brackets, braces, and parentheses
+            # Handle brackets, braces, and parentheses with depth tracking
             if not in_string:
                 if char == '(':
-                    result += " open paren "
+                    paren_depth += 1
+                    result += f" open paren level {paren_depth} "
                 elif char == ')':
-                    result += " close paren "
+                    if paren_depth > 0:
+                        result += f" close paren level {paren_depth} "
+                        paren_depth -= 1
+                    else:
+                        result += " close paren "
                 elif char == '[':
-                    result += " open bracket "
+                    bracket_depth += 1
+                    result += f" open bracket level {bracket_depth} "
                 elif char == ']':
-                    result += " close bracket "
+                    if bracket_depth > 0:
+                        result += f" close bracket level {bracket_depth} "
+                        bracket_depth -= 1
+                    else:
+                        result += " close bracket "
                 elif char == '{':
-                    result += " open brace "
+                    brace_depth += 1
+                    result += f" open brace level {brace_depth} "
                 elif char == '}':
-                    result += " close brace "
+                    if brace_depth > 0:
+                        result += f" close brace level {brace_depth} "
+                        brace_depth -= 1
+                    else:
+                        result += " close brace "
                 else:
                     result += char
             else:
@@ -184,44 +204,97 @@ def syntax_to_speech_code(code: str) -> str:
 
 def syntax_to_speech_value(value_str: str) -> str:
     """
-    Convert value representations to natural language.
+    Convert value representations to natural language with depth tracking.
     
-    This version is optimized for reading variable values and data structures.
+    This version is optimized for reading variable values and data structures,
+    and tracks nesting depth for brackets, braces, and parentheses.
     
     Args:
         value_str: String representation of a value
         
     Returns:
-        Value with syntax converted to speakable format
+        Value with syntax converted to speakable format including depth levels
     """
     if not value_str:
         return value_str
+    
+    result = ""
+    in_string = False
+    string_char = None
+    
+    # Track depth for each type of bracket
+    paren_depth = 0
+    bracket_depth = 0
+    brace_depth = 0
+    
+    # Determine primary structure type
+    is_dict = ":" in value_str and "{" in value_str
+    is_list = "[" in value_str
+    is_tuple = "(" in value_str and "," in value_str
+    
+    i = 0
+    while i < len(value_str):
+        char = value_str[i]
         
-    result = value_str
-    
-    # For values, we want clear structure announcements
-    replacements = {
-        "[": " list open bracket ",
-        "]": " close bracket ",
-        "{": " dict open brace ",
-        "}": " close brace ",
-        "(": " tuple open paren ",
-        ")": " close paren ",
-    }
-    
-    # Check if it looks like a dict (has colons) or a list/tuple
-    if ":" in value_str and "{" in value_str:
-        # It's likely a dict, use dict-specific language
-        replacements["{"] = " dictionary open brace "
-    elif "[" in value_str:
-        # It's likely a list
-        replacements["["] = " list open bracket "
-    elif "(" in value_str and "," in value_str:
-        # It's likely a tuple
-        replacements["("] = " tuple open paren "
-    
-    for syntax, speech in replacements.items():
-        result = result.replace(syntax, speech)
+        # Handle string detection to avoid counting brackets inside strings
+        if char in ['"', "'"] and (i == 0 or value_str[i-1] != '\\'):
+            if not in_string:
+                in_string = True
+                string_char = char
+                result += char
+            elif char == string_char:
+                in_string = False
+                string_char = None
+                result += char
+            else:
+                result += char
+            i += 1
+            continue
+        
+        # Handle brackets with depth tracking when not in string
+        if not in_string:
+            if char == '(':
+                paren_depth += 1
+                if is_tuple and paren_depth == 1:
+                    result += f" tuple open paren level {paren_depth} "
+                else:
+                    result += f" open paren level {paren_depth} "
+            elif char == ')':
+                if paren_depth > 0:
+                    result += f" close paren level {paren_depth} "
+                    paren_depth -= 1
+                else:
+                    result += " close paren "
+            elif char == '[':
+                bracket_depth += 1
+                if is_list and bracket_depth == 1:
+                    result += f" list open bracket level {bracket_depth} "
+                else:
+                    result += f" open bracket level {bracket_depth} "
+            elif char == ']':
+                if bracket_depth > 0:
+                    result += f" close bracket level {bracket_depth} "
+                    bracket_depth -= 1
+                else:
+                    result += " close bracket "
+            elif char == '{':
+                brace_depth += 1
+                if is_dict and brace_depth == 1:
+                    result += f" dictionary open brace level {brace_depth} "
+                else:
+                    result += f" open brace level {brace_depth} "
+            elif char == '}':
+                if brace_depth > 0:
+                    result += f" close brace level {brace_depth} "
+                    brace_depth -= 1
+                else:
+                    result += " close brace "
+            else:
+                result += char
+        else:
+            result += char
+        
+        i += 1
     
     # Clean up multiple spaces
     result = ' '.join(result.split())
