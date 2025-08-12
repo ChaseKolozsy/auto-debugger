@@ -188,7 +188,7 @@
         <button onclick="speakFunction(false)" style="padding: 6px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 8px;">🔊 Speak Signature (F)</button>
         <button onclick="speakFunction(true)" style="padding: 6px 12px; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer;">🔊 Speak Full Function (P)</button>
       </div>
-      <pre id="function-code" style="background: #f6f8fa; padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 13px; line-height: 1.5;"></pre>
+      <pre id="function-code" style="background: #1e293b; color: #e2e8f0; padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 13px; line-height: 1.5; font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; border: 1px solid #334155;"></pre>
       <div style="margin-top: 12px; padding: 8px; background: #eff6ff; border-radius: 6px;">
         <div style="font-size: 12px; color: #1e40af;">
           <strong>Shortcuts:</strong> F = Speak signature | P = Speak full | Q/Esc = Close
@@ -778,6 +778,8 @@
       let currentVarPage = 0;
       let varsPerPage = 10;
       let lastSpokenVariable = null;
+      let variableExplorerMode = 'scopes'; // 'scopes' or 'variables'
+      let selectedScope = null;
       
       // Changes explorer state
       let allChanges = [];
@@ -785,6 +787,9 @@
       let changesPerPage = 10;
       let lastSpokenChange = null;
       let changesExplorerIndex = 0;
+      let changesExplorerMode = 'scopes'; // 'scopes' or 'changes'
+      let selectedChangesScope = null;
+      let changesData = {};
       
       // Audio controls
       const playPauseBtn = document.getElementById('btn-play-pause');
@@ -878,30 +883,106 @@
         const data = await response.json();
         currentVariables = data.variables;
         
-        // Get all variables from all scopes
-        allVariables = [];
+        // Reset state
+        variableExplorerMode = 'scopes';
+        selectedScope = null;
+        currentVarPage = 0;
+        variableExplorerIndex = 0;
+        
+        // Display the modal
+        document.getElementById('variable-modal').style.display = 'block';
+        displayVariableScopesOrVars();
+      }
+      
+      function displayVariableScopesOrVars() {
+        if (variableExplorerMode === 'scopes') {
+          displayVariableScopes();
+        } else {
+          displayVariablePage();
+        }
+      }
+      
+      function displayVariableScopes() {
+        const varList = document.getElementById('variable-list');
+        varList.innerHTML = '';
+        
+        // Get available scopes
+        const scopes = [];
         for (const [scopeName, scopeVars] of Object.entries(currentVariables)) {
           if (typeof scopeVars === 'object' && !scopeName.startsWith('_')) {
-            for (const [varName, varValue] of Object.entries(scopeVars)) {
-              if (!varName.startsWith('_')) {
-                allVariables.push({scope: scopeName, name: varName, value: varValue});
-              }
+            const varCount = Object.keys(scopeVars).filter(k => !k.startsWith('_')).length;
+            scopes.push({name: scopeName, count: varCount, vars: scopeVars});
+          }
+        }
+        
+        // Update header
+        document.getElementById('var-page-num').textContent = '1';
+        document.getElementById('var-page-total').textContent = '1';
+        document.getElementById('var-total-count').textContent = `${scopes.length} scopes`;
+        
+        // Display scopes
+        scopes.forEach((scope, idx) => {
+          const div = document.createElement('div');
+          div.style.cssText = 'padding: 12px; margin: 6px 0; border: 2px solid #3b82f6; border-radius: 8px; cursor: pointer; display: flex; align-items: center; background: #eff6ff;';
+          div.dataset.scopeName = scope.name;
+          div.dataset.index = idx;
+          
+          const numBadge = `<span style="display: inline-block; width: 24px; height: 24px; background: #3b82f6; color: white; border-radius: 50%; text-align: center; line-height: 24px; margin-right: 12px; font-weight: bold; flex-shrink: 0;">${idx}</span>`;
+          
+          div.innerHTML = `
+            ${numBadge}
+            <div style="flex: 1;">
+              <div style="font-weight: 600; color: #1e40af; font-size: 15px;">${scope.name}</div>
+              <div style="font-size: 13px; color: #3b82f6; margin-top: 2px;">${scope.count} variables</div>
+            </div>
+          `;
+          
+          div.onclick = () => selectScope(scope.name);
+          varList.appendChild(div);
+        });
+        
+        if (scopes.length > 0) {
+          highlightVariableAtIndex(0);
+        }
+      }
+      
+      function selectScope(scopeName) {
+        selectedScope = scopeName;
+        variableExplorerMode = 'variables';
+        
+        // Get variables for this scope
+        allVariables = [];
+        const scopeVars = currentVariables[scopeName];
+        if (scopeVars && typeof scopeVars === 'object') {
+          for (const [varName, varValue] of Object.entries(scopeVars)) {
+            if (!varName.startsWith('_')) {
+              allVariables.push({scope: scopeName, name: varName, value: varValue});
             }
           }
         }
         
-        // Reset pagination
+        // Reset pagination for variables
         currentVarPage = 0;
         variableExplorerIndex = 0;
-        
-        // Display the modal and first page
-        document.getElementById('variable-modal').style.display = 'block';
         displayVariablePage();
       }
       
       function displayVariablePage() {
         const varList = document.getElementById('variable-list');
         varList.innerHTML = '';
+        
+        // Add back button if in variables mode
+        if (selectedScope) {
+          const backBtn = document.createElement('div');
+          backBtn.style.cssText = 'padding: 8px; margin: 0 0 8px 0; background: #f3f4f6; border-radius: 6px; cursor: pointer; text-align: center; border: 1px solid #e5e7eb;';
+          backBtn.innerHTML = `<strong>← Back to Scopes (B)</strong> | Current: ${selectedScope}`;
+          backBtn.onclick = () => {
+            variableExplorerMode = 'scopes';
+            selectedScope = null;
+            displayVariableScopesOrVars();
+          };
+          varList.appendChild(backBtn);
+        }
         
         const startIdx = currentVarPage * varsPerPage;
         const endIdx = Math.min(startIdx + varsPerPage, allVariables.length);
@@ -961,6 +1042,8 @@
         allVariables = [];
         currentVarPage = 0;
         variableExplorerIndex = 0;
+        variableExplorerMode = 'scopes';
+        selectedScope = null;
       }
       
       function highlightVariableAtIndex(pageIndex) {
@@ -1031,37 +1114,125 @@
         
         const response = await fetch(`/api/session/${sessionId}/line/${lineId}/variables`);
         const data = await response.json();
-        const changes = data.changes || {};
+        changesData = data.changes || {};
         
-        // Get all changes
-        allChanges = [];
-        for (const [key, value] of Object.entries(changes)) {
-          if (!key.startsWith('_')) {
-            allChanges.push({name: key, value: value, type: 'changed'});
+        // Check if there are any changes
+        let hasChanges = false;
+        for (const [key, value] of Object.entries(changesData)) {
+          if (!key.startsWith('_') && typeof value === 'object' && Object.keys(value).length > 0) {
+            hasChanges = true;
+            break;
           }
         }
         
-        // If no changes, show message
-        if (allChanges.length === 0) {
-          await stopAudio();
-          await fetch('/api/tts/stop', {method: 'POST'});
-          // Speak "no changes"
-          const speakResponse = await fetch(`/api/session/${sessionId}/line/${lineId}/variables?speak=true&mode=changes`);
+        if (!hasChanges) {
+          // No changes - just speak it
+          await fetch(`/api/session/${sessionId}/line/${lineId}/variables?speak=true&mode=changes`);
           return;
         }
         
-        // Reset pagination
+        // Reset state
+        changesExplorerMode = 'scopes';
+        selectedChangesScope = null;
         currentChangesPage = 0;
         changesExplorerIndex = 0;
         
-        // Display the modal and first page
+        // Display the modal
         document.getElementById('changes-modal').style.display = 'block';
+        displayChangesScopesOrChanges();
+      }
+      
+      function displayChangesScopesOrChanges() {
+        if (changesExplorerMode === 'scopes') {
+          displayChangesScopes();
+        } else {
+          displayChangesPage();
+        }
+      }
+      
+      function displayChangesScopes() {
+        const changesList = document.getElementById('changes-list');
+        changesList.innerHTML = '';
+        
+        // Get available scopes with changes
+        const scopes = [];
+        for (const [scopeName, scopeChanges] of Object.entries(changesData)) {
+          if (typeof scopeChanges === 'object' && !scopeName.startsWith('_')) {
+            const changeCount = Object.keys(scopeChanges).filter(k => !k.startsWith('_')).length;
+            if (changeCount > 0) {
+              scopes.push({name: scopeName, count: changeCount, changes: scopeChanges});
+            }
+          }
+        }
+        
+        // Update header
+        document.getElementById('changes-page-num').textContent = '1';
+        document.getElementById('changes-page-total').textContent = '1';
+        document.getElementById('changes-total-count').textContent = `${scopes.length} scopes`;
+        
+        // Display scopes
+        scopes.forEach((scope, idx) => {
+          const div = document.createElement('div');
+          div.style.cssText = 'padding: 12px; margin: 6px 0; border: 2px solid #f59e0b; border-radius: 8px; cursor: pointer; display: flex; align-items: center; background: #fef3c7;';
+          div.dataset.scopeName = scope.name;
+          div.dataset.index = idx;
+          
+          const numBadge = `<span style="display: inline-block; width: 24px; height: 24px; background: #f59e0b; color: white; border-radius: 50%; text-align: center; line-height: 24px; margin-right: 12px; font-weight: bold; flex-shrink: 0;">${idx}</span>`;
+          
+          div.innerHTML = `
+            ${numBadge}
+            <div style="flex: 1;">
+              <div style="font-weight: 600; color: #92400e; font-size: 15px;">🔄 ${scope.name}</div>
+              <div style="font-size: 13px; color: #78350f; margin-top: 2px;">${scope.count} changes</div>
+            </div>
+          `;
+          
+          div.onclick = () => selectChangesScope(scope.name);
+          changesList.appendChild(div);
+        });
+        
+        if (scopes.length > 0) {
+          highlightChangeAtIndex(0);
+        }
+      }
+      
+      function selectChangesScope(scopeName) {
+        selectedChangesScope = scopeName;
+        changesExplorerMode = 'changes';
+        
+        // Get changes for this scope
+        allChanges = [];
+        const scopeChanges = changesData[scopeName];
+        if (scopeChanges && typeof scopeChanges === 'object') {
+          for (const [changeName, changeValue] of Object.entries(scopeChanges)) {
+            if (!changeName.startsWith('_')) {
+              allChanges.push({name: changeName, value: changeValue, scope: scopeName});
+            }
+          }
+        }
+        
+        // Reset pagination for changes
+        currentChangesPage = 0;
+        changesExplorerIndex = 0;
         displayChangesPage();
       }
       
       function displayChangesPage() {
         const changesList = document.getElementById('changes-list');
         changesList.innerHTML = '';
+        
+        // Add back button if in changes mode
+        if (selectedChangesScope) {
+          const backBtn = document.createElement('div');
+          backBtn.style.cssText = 'padding: 8px; margin: 0 0 8px 0; background: #fef3c7; border-radius: 6px; cursor: pointer; text-align: center; border: 1px solid #fbbf24;';
+          backBtn.innerHTML = `<strong>← Back to Scopes (B)</strong> | Current: ${selectedChangesScope}`;
+          backBtn.onclick = () => {
+            changesExplorerMode = 'scopes';
+            selectedChangesScope = null;
+            displayChangesScopesOrChanges();
+          };
+          changesList.appendChild(backBtn);
+        }
         
         const startIdx = currentChangesPage * changesPerPage;
         const endIdx = Math.min(startIdx + changesPerPage, allChanges.length);
@@ -1107,7 +1278,7 @@
           
           div.onclick = () => {
             highlightChangeAtIndex(idx);
-            exploreChange(change.name, change.value);
+            exploreChange(change.name, change.value, change.scope);
           };
           changesList.appendChild(div);
         });
@@ -1123,6 +1294,8 @@
         allChanges = [];
         currentChangesPage = 0;
         changesExplorerIndex = 0;
+        changesExplorerMode = 'scopes';
+        selectedChangesScope = null;
       }
       
       function highlightChangeAtIndex(pageIndex) {
@@ -1158,12 +1331,12 @@
         }
       }
       
-      async function exploreChange(changeName, changeValue) {
+      async function exploreChange(changeName, changeValue, scope) {
         if (!selected) return;
         const lineId = selected.dataset.lineId;
         
         // Store for repeat functionality
-        lastSpokenChange = {name: changeName, value: changeValue, lineId};
+        lastSpokenChange = {name: changeName, value: changeValue, scope: scope, lineId};
         
         // Use the explore endpoint to speak this specific change
         await fetch(`/api/session/${sessionId}/line/${lineId}/explore`, {
@@ -1171,7 +1344,7 @@
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
             variable: changeName,
-            path: [],  // Changes are at root level
+            path: scope ? [scope] : [],  // Include scope in path if available
             speak: true
           })
         });
@@ -1179,7 +1352,7 @@
       
       async function repeatLastChange() {
         if (lastSpokenChange) {
-          await exploreChange(lastSpokenChange.name, lastSpokenChange.value);
+          await exploreChange(lastSpokenChange.name, lastSpokenChange.value, lastSpokenChange.scope);
         }
       }
       
@@ -1191,6 +1364,20 @@
       document.addEventListener('keydown', async (e) => {
         // Don't trigger shortcuts when typing in inputs
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+          return;
+        }
+        
+        // Speed control - always available
+        if (e.key.toLowerCase() === 's' && !e.shiftKey) {
+          e.preventDefault();
+          const speeds = ['slow', 'medium', 'fast'];
+          const currentIndex = speeds.indexOf(speedSelect.value);
+          const nextIndex = (currentIndex + 1) % speeds.length;
+          speedSelect.value = speeds[nextIndex];
+          speedSelect.dispatchEvent(new Event('change'));
+          // Visual feedback
+          const speedText = speedSelect.value.charAt(0).toUpperCase() + speedSelect.value.slice(1);
+          console.log(`Speed changed to: ${speedText}`);
           return;
         }
         
@@ -1241,16 +1428,6 @@
           exploreChanges();
         }
         
-        // Speed control
-        else if (e.key.toLowerCase() === 's') {
-          e.preventDefault();
-          const speeds = ['slow', 'medium', 'fast'];
-          const currentIndex = speeds.indexOf(speedSelect.value);
-          const nextIndex = (currentIndex + 1) % speeds.length;
-          speedSelect.value = speeds[nextIndex];
-          speedSelect.dispatchEvent(new Event('change'));
-        }
-        
         // Function modal navigation
         if (document.getElementById('function-modal').style.display === 'block') {
           if (e.key.toLowerCase() === 'f') {
@@ -1267,19 +1444,38 @@
         
         // Changes explorer navigation
         if (document.getElementById('changes-modal').style.display === 'block') {
-          const items = document.querySelectorAll('#changes-list > div');
+          const items = document.querySelectorAll('#changes-list > div:not(:first-child)'); // Exclude back button if present
+          
+          // Back to scopes
+          if (e.key.toLowerCase() === 'b' && changesExplorerMode === 'changes') {
+            e.preventDefault();
+            changesExplorerMode = 'scopes';
+            selectedChangesScope = null;
+            displayChangesScopesOrChanges();
+            return;
+          }
           
           // Number keys 0-9 for direct selection
           if (e.key >= '0' && e.key <= '9') {
             e.preventDefault();
             const num = parseInt(e.key);
-            if (num < items.length) {
-              const item = items[num];
-              highlightChangeAtIndex(num);
-              const changeName = item.dataset.changeName;
-              const change = allChanges[currentChangesPage * changesPerPage + num];
-              if (change) {
-                exploreChange(change.name, change.value);
+            
+            if (changesExplorerMode === 'scopes') {
+              // Select scope
+              const scopeItems = document.querySelectorAll('#changes-list > div');
+              if (num < scopeItems.length) {
+                const item = scopeItems[num];
+                selectChangesScope(item.dataset.scopeName);
+              }
+            } else {
+              // Select change (accounting for back button)
+              const changeItems = document.querySelectorAll('#changes-list > div:not(:first-child)');
+              if (num < changeItems.length) {
+                const change = allChanges[currentChangesPage * changesPerPage + num];
+                if (change) {
+                  highlightChangeAtIndex(num);
+                  exploreChange(change.name, change.value, change.scope);
+                }
               }
             }
           }
@@ -1292,11 +1488,18 @@
             highlightChangeAtIndex(changesExplorerIndex + 1);
           }
           // Select current item
-          else if (e.key === 'Enter' && items[changesExplorerIndex]) {
+          else if (e.key === 'Enter') {
             e.preventDefault();
-            const change = allChanges[currentChangesPage * changesPerPage + changesExplorerIndex];
-            if (change) {
-              exploreChange(change.name, change.value);
+            if (changesExplorerMode === 'scopes') {
+              const scopeItems = document.querySelectorAll('#changes-list > div');
+              if (scopeItems[changesExplorerIndex]) {
+                selectChangesScope(scopeItems[changesExplorerIndex].dataset.scopeName);
+              }
+            } else {
+              const change = allChanges[currentChangesPage * changesPerPage + changesExplorerIndex];
+              if (change) {
+                exploreChange(change.name, change.value, change.scope);
+              }
             }
           }
           // Pagination
@@ -1321,16 +1524,37 @@
         
         // Variable explorer navigation
         if (document.getElementById('variable-modal').style.display === 'block') {
-          const items = document.querySelectorAll('#variable-list > div');
+          const items = document.querySelectorAll('#variable-list > div:not(:first-child)'); // Exclude back button if present
+          
+          // Back to scopes
+          if (e.key.toLowerCase() === 'b' && variableExplorerMode === 'variables') {
+            e.preventDefault();
+            variableExplorerMode = 'scopes';
+            selectedScope = null;
+            displayVariableScopesOrVars();
+            return;
+          }
           
           // Number keys 0-9 for direct selection
           if (e.key >= '0' && e.key <= '9') {
             e.preventDefault();
             const num = parseInt(e.key);
-            if (num < items.length) {
-              const item = items[num];
-              highlightVariableAtIndex(num);
-              exploreVariable(item.dataset.scope, item.dataset.varName);
+            
+            if (variableExplorerMode === 'scopes') {
+              // Select scope
+              const scopeItems = document.querySelectorAll('#variable-list > div');
+              if (num < scopeItems.length) {
+                const item = scopeItems[num];
+                selectScope(item.dataset.scopeName);
+              }
+            } else {
+              // Select variable (accounting for back button)
+              const varItems = document.querySelectorAll('#variable-list > div:not(:first-child)');
+              if (num < varItems.length) {
+                const item = varItems[num];
+                highlightVariableAtIndex(num);
+                exploreVariable(item.dataset.scope, item.dataset.varName);
+              }
             }
           }
           // Navigation keys
