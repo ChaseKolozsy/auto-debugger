@@ -255,6 +255,9 @@ def syntax_to_speech_code(code: str) -> str:
                 elif char == ':':
                     # Always announce colon
                     result += " colon "
+                elif char == '.':
+                    # Always announce dot for method calls and property access
+                    result += " dot "
                 else:
                     result += char
             else:
@@ -363,6 +366,9 @@ def syntax_to_speech_value(value_str: str) -> str:
             elif char == ':':
                 # Always announce colon (especially important for dictionaries)
                 result += " colon "
+            elif char == '.':
+                # Always announce dot for object notation
+                result += " dot "
             else:
                 result += char
         else:
