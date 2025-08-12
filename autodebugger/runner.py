@@ -21,9 +21,12 @@ USE_ENHANCED = True
 if USE_ENHANCED:
     try:
         from .enhanced_control import HttpStepController, prompt_for_action
-    except ImportError:
+        print("[DEBUG] Using enhanced_control.py", file=sys.stderr)
+    except ImportError as e:
+        print(f"[DEBUG] Failed to import enhanced_control: {e}, falling back to control.py", file=sys.stderr)
         from .control import HttpStepController, prompt_for_action
 else:
+    print("[DEBUG] Using control.py (USE_ENHANCED=False)", file=sys.stderr)
     from .control import HttpStepController, prompt_for_action
 from .common import extract_function_context, summarize_value, summarize_delta
 from .function_blocks import FunctionBlockExplorer
@@ -1145,6 +1148,11 @@ class AutoDebugger:
                                                     if not block_action:
                                                         # Continue waiting for web input
                                                         continue
+                                                    # Handle stop_audio immediately
+                                                    if block_action.strip().lower() == 'stop_audio':
+                                                        if self._tts:
+                                                            self._tts.stop()
+                                                        continue  # Continue waiting for the real action
                                                 else:
                                                     # Terminal interface - simple input for block exploration
                                                     print("\n[blocks] 0-9=select, n=next, p=prev, s=speed, q=quit: ", end='', flush=True)
@@ -1306,6 +1314,12 @@ class AutoDebugger:
                                                 while selection is None:
                                                     selection = self._controller.wait_for_action(0.2)
                                                     if selection:
+                                                        # Handle stop_audio immediately
+                                                        if selection.strip().lower() == 'stop_audio':
+                                                            if self._tts:
+                                                                self._tts.stop()
+                                                            selection = None  # Continue waiting for the real selection
+                                                            continue
                                                         selection = selection.strip().lower()
                                                         break
                                                     if self._abort_requested:
@@ -1439,6 +1453,12 @@ class AutoDebugger:
                                                 while selection is None:
                                                     selection = self._controller.wait_for_action(0.2)
                                                     if selection:
+                                                        # Handle stop_audio immediately
+                                                        if selection.strip().lower() == 'stop_audio':
+                                                            if self._tts:
+                                                                self._tts.stop()
+                                                            selection = None  # Continue waiting for the real selection
+                                                            continue
                                                         selection = selection.strip().lower()
                                                         break
                                                     if self._abort_requested:

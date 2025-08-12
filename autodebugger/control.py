@@ -119,7 +119,8 @@ class StepControlHandler(BaseHTTPRequestHandler):
         body {
             font-family: system-ui, -apple-system, sans-serif;
             margin: 20px;
-            background: #f5f5f5;
+            background: #f9fafb;
+            color: #111827;
         }
         .container {
             max-width: 900px;
@@ -310,6 +311,16 @@ class StepControlHandler(BaseHTTPRequestHandler):
         
         async function sendAction(action) {
             try {
+                // Send stop audio command first to interrupt any playing audio
+                // (except for the stop_audio action itself to avoid recursion)
+                if (action !== 'stop_audio') {
+                    await fetch('/command', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({action: 'stop_audio'})
+                    });
+                }
+                
                 await fetch('/command', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -324,7 +335,10 @@ class StepControlHandler(BaseHTTPRequestHandler):
         
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                sendAction('stop_audio');
+            } else if (e.key === 'Enter') {
                 e.preventDefault();
                 sendAction('step');
             } else if (e.key === 'v' || e.key === 'V') {

@@ -172,18 +172,24 @@ class StepControlHandler(BaseHTTPRequestHandler):
             # Don't log state requests as they happen every 500ms
             self._send(200, self.shared.get_state())
         elif self.path == "/" or self.path.startswith("/index.html"):
+            # Check if our changes are in the HTML
+            if '#f9fafb' in open(__file__).read():
+                print(f"[DEBUG] Source file has new background color #f9fafb", file=sys.stderr)
+            else:
+                print(f"[DEBUG] WARNING: Source file missing new background color!", file=sys.stderr)
             html = """<!doctype html>
 <html>
 <head>
     <meta charset='utf-8'>
-    <title>AutoDebugger Manual Control</title>
+    <title>AutoDebugger Manual Control v2</title>
     <meta name='viewport' content='width=device-width, initial-scale=1'>
     <style>
+        /* VERSION 2 STYLES - DARK BLUE THEME LIKE SESSION REVIEWER */
         body {
             font-family: system-ui, -apple-system, sans-serif;
-            margin: 20px;
-            background: #f9fafb;
-            color: #111827;
+            margin: 24px;
+            background: #0b1020 !important;  /* Dark blue background */
+            color: #e5e7eb;
         }
         .container {
             max-width: 1200px;
@@ -198,12 +204,15 @@ class StepControlHandler(BaseHTTPRequestHandler):
             }
         }
         .card {
-            background: white;
+            background: linear-gradient(180deg, #0f172a, #0b1020);
             border-radius: 12px;
             padding: 24px;
             margin-bottom: 20px;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-            border: 1px solid #e5e7eb;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.4);
+            border: 1px solid #263041;
+        }
+        h1, h2, h3 {
+            color: #e5e7eb;
         }
         .status {
             display: grid;
@@ -213,30 +222,33 @@ class StepControlHandler(BaseHTTPRequestHandler):
         }
         .status-label {
             font-weight: bold;
-            color: #666;
+            color: #94a3b8;
         }
         .status-value {
             font-family: monospace;
+            color: #e5e7eb;
         }
         .code-block {
-            background: #f8f8f8;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            padding: 15px;
-            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
-            font-size: 14px;
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 16px;
+            font-family: 'Monaco', 'Menlo', 'SF Mono', monospace;
+            font-size: 13px;
             margin: 15px 0;
             overflow-x: auto;
             white-space: pre;
             cursor: pointer;
             position: relative;
+            color: #e2e8f0;
         }
         .code-block:hover {
-            background: #f0f0f0;
+            background: #1e293b;
+            border-color: #60a5fa;
         }
         .function-context {
-            background: #e8f4fd;
-            border: 1px solid #bee5eb;
+            background: #1e293b;
+            border: 1px solid #334155;
             border-radius: 4px;
             padding: 15px;
             margin: 15px 0;
@@ -249,13 +261,13 @@ class StepControlHandler(BaseHTTPRequestHandler):
             font-family: 'SF Mono', Monaco, 'Courier New', monospace;
             font-size: 14px;
             font-weight: bold;
-            color: #0066cc;
+            color: #60a5fa;
             margin-bottom: 10px;
         }
         .function-body {
             font-family: 'SF Mono', Monaco, 'Courier New', monospace;
             font-size: 13px;
-            color: #333;
+            color: #e2e8f0;
             white-space: pre;
             overflow-x: auto;
             max-height: 300px;
@@ -269,49 +281,65 @@ class StepControlHandler(BaseHTTPRequestHandler):
         button {
             padding: 8px 16px;
             border-radius: 6px;
-            border: 1px solid #d1d5db;
-            background: white;
+            border: 1px solid #334155;
+            background: #1e293b;
             cursor: pointer;
             font-size: 14px;
             font-weight: 500;
             transition: all 0.2s;
-            color: #374151;
+            color: #e2e8f0;
         }
         button:hover {
-            background: #f3f4f6;
-            border-color: #9ca3af;
+            background: #334155;
+            border-color: #475569;
         }
         button.primary {
-            background: #3b82f6;
+            background: #2563eb;
             color: white;
-            border-color: #2563eb;
+            border-color: #1d4ed8;
         }
         button.primary:hover {
-            background: #2563eb;
+            background: #1d4ed8;
         }
         button.danger {
-            background: #ef4444;
+            background: #dc2626;
             color: white;
-            border-color: #dc2626;
+            border-color: #b91c1c;
         }
         button.danger:hover {
-            background: #dc2626;
+            background: #b91c1c;
         }
         button.success {
-            background: #10b981;
+            background: #059669;
             color: white;
-            border-color: #059669;
+            border-color: #047857;
         }
         button.success:hover {
-            background: #059669;
+            background: #047857;
         }
         button.warning {
-            background: #ffc107;
-            color: #212529;
-            border-color: #ffc107;
+            background: #d97706;
+            color: white;
+            border-color: #b45309;
         }
         button.warning:hover {
-            background: #e0a800;
+            background: #b45309;
+        }
+        button.info {
+            background: #0891b2;
+            color: white;
+            border-color: #0e7490;
+        }
+        button.info:hover {
+            background: #0e7490;
+        }
+        button.secondary {
+            background: #6366f1;
+            color: white;
+            border-color: #4f46e5;
+        }
+        button.secondary:hover {
+            background: #4f46e5;
         }
         #audioToggle {
             background: #6c757d;
@@ -329,11 +357,11 @@ class StepControlHandler(BaseHTTPRequestHandler):
             background: #138496;
         }
         .waiting {
-            color: #28a745;
+            color: #10b981;
             font-weight: bold;
         }
         .running {
-            color: #ffc107;
+            color: #f59e0b;
             font-weight: bold;
         }
         .mode-indicator {
@@ -345,11 +373,11 @@ class StepControlHandler(BaseHTTPRequestHandler):
             text-transform: uppercase;
         }
         .mode-manual {
-            background: #007bff;
+            background: #2563eb;
             color: white;
         }
         .mode-auto {
-            background: #28a745;
+            background: #059669;
             color: white;
         }
         .variables {
@@ -362,46 +390,46 @@ class StepControlHandler(BaseHTTPRequestHandler):
             gap: 10px;
             padding: 10px;
             margin: 4px 0;
-            border: 1px solid #e5e7eb;
+            border: 1px solid #334155;
             border-radius: 6px;
             font-family: 'Monaco', 'Menlo', 'SF Mono', monospace;
             font-size: 13px;
-            background: #f9fafb;
+            background: #1e293b;
             transition: all 0.2s;
         }
         .variable-item:hover {
-            background: #f3f4f6;
-            border-color: #d1d5db;
+            background: #263041;
+            border-color: #60a5fa;
             cursor: pointer;
         }
         .variable-name {
             font-weight: 600;
-            color: #2563eb;
+            color: #60a5fa;
             word-break: break-word;
         }
         .variable-value {
-            color: #374151;
+            color: #e2e8f0;
             word-break: break-word;
         }
         .variable-changed {
-            background: #fef3c7;
-            border-color: #fbbf24;
+            background: #422006;
+            border-color: #f59e0b;
             animation: highlight 1s ease-out;
         }
         @keyframes highlight {
-            from { background: #ffc107; }
-            to { background: #fff3cd; }
+            from { background: #78350f; }
+            to { background: #422006; }
         }
         .section-title {
             font-size: 14px;
             font-weight: bold;
-            color: #666;
+            color: #94a3b8;
             margin: 15px 0 10px 0;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
         .hint {
-            color: #999;
+            color: #64748b;
             font-size: 12px;
             font-style: italic;
             margin-top: 5px;
@@ -444,13 +472,13 @@ class StepControlHandler(BaseHTTPRequestHandler):
                 
                 <div class="controls">
                     <button class="primary" onclick="sendAction('step')">Step (Enter)</button>
-                    <button onclick="sendAction('variables')">Variables (V)</button>
-                    <button onclick="sendAction('function')">Function (F)</button>
-                    <button onclick="sendAction('parts')">Function Parts (P)</button>
-                    <button onclick="sendAction('explore')">Explore Changes (E)</button>
-                    <button onclick="sendAction('variables_explore')">Explore Variables (W)</button>
+                    <button class="info" onclick="sendAction('variables')">Variables (V)</button>
+                    <button class="info" onclick="sendAction('function')">Function (F)</button>
+                    <button class="info" onclick="sendAction('parts')">Function Parts (P)</button>
+                    <button class="warning" onclick="sendAction('explore')">Explore Changes (E)</button>
+                    <button class="warning" onclick="sendAction('variables_explore')">Explore Variables (W)</button>
                     <button class="success" onclick="sendAction('auto')">Auto Mode (A)</button>
-                    <button onclick="sendAction('continue')">Continue</button>
+                    <button class="secondary" onclick="sendAction('continue')">Continue</button>
                     <button class="danger" onclick="sendAction('quit')">Quit (Q)</button>
                     <button id="audioToggle" onclick="toggleAudio()">🔇 Audio Off</button>
                 </div>
@@ -478,7 +506,7 @@ class StepControlHandler(BaseHTTPRequestHandler):
             <div class="card">
                 <h3>Variables</h3>
                 <div class="variables" id="variables">
-                    <div style="color: #999; text-align: center; padding: 20px;">
+                    <div style="color: #64748b; text-align: center; padding: 20px;">
                         No variables yet
                     </div>
                 </div>
@@ -487,7 +515,7 @@ class StepControlHandler(BaseHTTPRequestHandler):
             <div class="card">
                 <h3>Changes</h3>
                 <div class="variables" id="changes">
-                    <div style="color: #999; text-align: center; padding: 20px;">
+                    <div style="color: #64748b; text-align: center; padding: 20px;">
                         No changes yet
                     </div>
                 </div>
@@ -526,7 +554,7 @@ class StepControlHandler(BaseHTTPRequestHandler):
         function renderVariables(variables, containerId, highlight = false) {
             const container = document.getElementById(containerId);
             if (!variables || Object.keys(variables).length === 0) {
-                container.innerHTML = '<div style="color: #999; text-align: center; padding: 20px;">No ' + 
+                container.innerHTML = '<div style="color: #64748b; text-align: center; padding: 20px;">No ' + 
                                      (containerId === 'changes' ? 'changes' : 'variables') + ' yet</div>';
                 return;
             }
@@ -545,7 +573,7 @@ class StepControlHandler(BaseHTTPRequestHandler):
                     }
                 }
             }
-            container.innerHTML = html || '<div style="color: #999; text-align: center; padding: 20px;">Empty</div>';
+            container.innerHTML = html || '<div style="color: #64748b; text-align: center; padding: 20px;">Empty</div>';
         }
         
         function updateUI(state) {
