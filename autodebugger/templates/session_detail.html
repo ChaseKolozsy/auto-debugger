@@ -165,10 +165,10 @@
     </div>
     <div style="font-size: 13px; color: #475569; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px;">
       <div><kbd>Space</kbd> Play/Pause current line</div>
-      <div><kbd>↑/↓</kbd> Navigate lines</div>
+      <div><kbd>↑/↓/Enter</kbd> Navigate (Shift+Enter = back)</div>
       <div><kbd>X</kbd> Show function code</div>
       <div><kbd>F</kbd> Speak function signature</div>
-      <div><kbd>P</kbd> Explore function (full)</div>
+      <div><kbd>P</kbd> Explore function blocks</div>
       <div><kbd>V</kbd> Speak variables summary</div>
       <div><kbd>W</kbd> Explore variables interactively</div>
       <div><kbd>E</kbd> Explore changes</div>
@@ -186,12 +186,11 @@
       </div>
       <div style="margin-bottom: 12px;">
         <button onclick="speakFunction(false)" style="padding: 6px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 8px;">🔊 Speak Signature (F)</button>
-        <button onclick="speakFunction(true)" style="padding: 6px 12px; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer;">🔊 Speak Full Function (P)</button>
       </div>
       <pre id="function-code" style="background: #1e293b; color: #e2e8f0; padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 13px; line-height: 1.5; font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; border: 1px solid #334155;"></pre>
       <div style="margin-top: 12px; padding: 8px; background: #eff6ff; border-radius: 6px;">
         <div style="font-size: 12px; color: #1e40af;">
-          <strong>Shortcuts:</strong> F = Speak signature | P = Speak full | Q/Esc = Close
+          <strong>Shortcuts:</strong> F = Speak signature | Q/Esc = Close
         </div>
       </div>
     </div>
@@ -219,6 +218,32 @@
           • <kbd>n</kbd> Next page | <kbd>p</kbd> Previous page<br>
           • <kbd>q</kbd> or <kbd>Esc</kbd> to close explorer<br>
           • <kbd>r</kbd> Repeat last spoken variable
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Block Explorer Modal -->
+  <div id="block-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000;">
+    <div style="position: absolute; top: 5%; left: 5%; right: 5%; bottom: 5%; background: white; border-radius: 12px; padding: 24px; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.2); display: flex; flex-direction: column;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3 style="margin: 0;">Function Block Explorer</h3>
+        <button id="close-block-modal-btn" onclick="closeBlockModal()" style="background: #ef4444; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">✕ Close (Q)</button>
+      </div>
+      <div style="background: #f3f4f6; padding: 8px; border-radius: 6px; margin-bottom: 12px;">
+        <div style="font-size: 13px; color: #374151; font-weight: 600;">
+          Page <span id="block-page-num">1</span> of <span id="block-page-total">1</span> | 
+          Total blocks: <span id="block-total-count">0</span>
+        </div>
+      </div>
+      <div id="block-list" style="flex: 1; overflow-y: auto; margin-bottom: 12px; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px;"></div>
+      <div style="background: #ecfdf5; padding: 12px; border-radius: 6px; border: 1px solid #10b981;">
+        <div style="font-size: 13px; color: #047857; line-height: 1.6;">
+          <strong>Controls:</strong><br>
+          • Press <kbd>0-9</kbd> to select and hear block by number<br>
+          • <kbd>n</kbd> Next page | <kbd>p</kbd> Previous page<br>
+          • <kbd>q</kbd> or <kbd>Esc</kbd> to close explorer<br>
+          • <kbd>s</kbd> Change speech speed
         </div>
       </div>
     </div>
@@ -346,6 +371,11 @@
   </div>
 
   <script>
+    // Global variables for table navigation
+    let selected = null;
+    let rows = [];
+    let selectRow = null; // Will be defined inside IIFE
+    
     (function() {
       const state = {
         showLibs: false,
@@ -703,18 +733,24 @@
       const tbody = document.querySelector('tbody');
       const tableContainer = document.querySelector('.table-container');
       if (!tbody) return;
-      let selected = null;
-      let rows = Array.from(tbody.querySelectorAll('tr'));
+      // Use global variables
+      rows = Array.from(tbody.querySelectorAll('tr'));
       function updateStepperStatus() {
         if (!selected) { document.getElementById('stepper-status').textContent = ''; return; }
         const idx = rows.indexOf(selected);
         if (idx >= 0) document.getElementById('stepper-status').textContent = `Row ${idx+1} of ${rows.length}`;
       }
-      function selectRow(tr) {
+      // Assign to global variable
+      selectRow = function(tr) {
         if (!tr) return;
-        if (selected) selected.classList.remove('selected');
+        if (selected) {
+          selected.classList.remove('selected');
+          selected.removeAttribute('tabindex');
+        }
         selected = tr;
         tr.classList.add('selected');
+        tr.setAttribute('tabindex', '0');
+        tr.focus(); // Focus the row directly for keyboard navigation
         // Keep selection visible within the table container without moving the whole page
         if (tableContainer) {
           const rowTop = tr.offsetTop;
@@ -746,9 +782,24 @@
       optScalars.addEventListener('click', () => { state.showScalarsFirst = !state.showScalarsFirst; optScalars.classList.toggle('active', state.showScalarsFirst); rerender(); });
       optLong.addEventListener('click', () => { state.expandLong = !state.expandLong; optLong.classList.toggle('active', state.expandLong); rerender(); });
 
-      // Auto-select the first row if present
+      // Auto-select the first row if present and ensure focus
       const first = tbody.querySelector('tr');
-      if (first) selectRow(first);
+      if (first) {
+        selectRow(first);
+        // Set focus to enable keyboard navigation with a small delay
+        setTimeout(() => {
+          if (tableContainer) {
+            tableContainer.setAttribute('tabindex', '0'); // Make it focusable
+            tableContainer.focus();
+          } else {
+            // Fallback to focusing the body
+            window.focus();
+            document.body.setAttribute('tabindex', '0');
+            document.body.focus();
+          }
+          console.log('Focus set for keyboard navigation');
+        }, 100);
+      }
 
       // Stepper controls
       const btnPrev = document.getElementById('step-prev');
@@ -824,7 +875,7 @@
       async function togglePlayCurrentLine() {
         if (!selected) return;
         
-        const lineId = selected.dataset.lineId;
+        const lineId = selected.dataset.id;
         if (!lineId) return;
         
         if (isPlaying) {
@@ -847,7 +898,7 @@
       
       async function showFunctionCode() {
         if (!selected) return;
-        const lineId = selected.dataset.lineId;
+        const lineId = selected.dataset.id;
         if (!lineId) return;
         
         const response = await fetch(`/api/session/${sessionId}/line/${lineId}/function`);
@@ -860,7 +911,7 @@
       
       async function speakFunction(full = false) {
         if (!selected) return;
-        const lineId = selected.dataset.lineId;
+        const lineId = selected.dataset.id;
         if (!lineId) return;
         
         await fetch(`/api/session/${sessionId}/line/${lineId}/function?speak=true&full=${full}`);
@@ -868,7 +919,7 @@
       
       async function speakVariables(mode = 'summary') {
         if (!selected) return;
-        const lineId = selected.dataset.lineId;
+        const lineId = selected.dataset.id;
         if (!lineId) return;
         
         await fetch(`/api/session/${sessionId}/line/${lineId}/variables?speak=true&mode=${mode}`);
@@ -876,15 +927,14 @@
       
       async function exploreVariables() {
         if (!selected) return;
-        const lineId = selected.dataset.lineId;
+        const lineId = selected.dataset.id;
         if (!lineId) return;
         
         const response = await fetch(`/api/session/${sessionId}/line/${lineId}/variables`);
         const data = await response.json();
         currentVariables = data.variables;
         
-        // Speak the summary first
-        await fetch(`/api/session/${sessionId}/line/${lineId}/variables?speak=true&mode=summary`);
+        // DON'T speak the summary yet - wait for user to select a scope
         
         // Reset state
         variableExplorerMode = 'scopes';
@@ -897,19 +947,48 @@
         displayVariableScopesOrVars();
         
         // Announce navigation instructions
-        announceNavigationInstructions();
+        announceVariableScopeInstructions();
       }
       
-      async function announceNavigationInstructions() {
-        // Announce how to navigate
-        await fetch('/api/tts/speak', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            text: "Press 0 through 9 to select a scope. Press Q to quit.",
-            interrupt: false
-          })
-        });
+      async function announceVariableScopeInstructions() {
+        // Get available scopes
+        const scopes = [];
+        for (const [scopeName, scopeVars] of Object.entries(currentVariables)) {
+          if (typeof scopeVars === 'object' && !scopeName.startsWith('_')) {
+            const varCount = Object.keys(scopeVars).filter(k => !k.startsWith('_')).length;
+            if (varCount > 0) {
+              scopes.push(scopeName);
+            }
+          }
+        }
+        
+        if (scopes.length === 0) {
+          await fetch('/api/tts/speak', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              text: "No local or global variables available.",
+              interrupt: false
+            })
+          });
+        } else {
+          let instruction = "";
+          scopes.forEach((scope, idx) => {
+            if (idx > 0) instruction += " or ";
+            const scopeLabel = scope.toLowerCase().includes('global') ? 'Global' : 'Local';
+            instruction += `press ${idx} for ${scopeLabel}`;
+          });
+          instruction += ". Press Q to quit.";
+          
+          await fetch('/api/tts/speak', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              text: instruction,
+              interrupt: false
+            })
+          });
+        }
       }
       
       function displayVariableScopesOrVars() {
@@ -929,8 +1008,16 @@
         for (const [scopeName, scopeVars] of Object.entries(currentVariables)) {
           if (typeof scopeVars === 'object' && !scopeName.startsWith('_')) {
             const varCount = Object.keys(scopeVars).filter(k => !k.startsWith('_')).length;
-            scopes.push({name: scopeName, count: varCount, vars: scopeVars});
+            if (varCount > 0) {  // Only add scopes that have variables
+              scopes.push({name: scopeName, count: varCount, vars: scopeVars});
+            }
           }
+        }
+        
+        // If no scopes available, close the modal
+        if (scopes.length === 0) {
+          document.getElementById('variable-modal').style.display = 'none';
+          return;
         }
         
         // Update header
@@ -1113,7 +1200,7 @@
       
       async function exploreVariable(scope, varName) {
         if (!selected) return;
-        const lineId = selected.dataset.lineId;
+        const lineId = selected.dataset.id;
         
         // Store for repeat functionality
         lastSpokenVariable = {scope, varName, lineId};
@@ -1121,7 +1208,7 @@
         // Navigate to the variable in the scope
         const path = scope ? [scope] : [];
         
-        // This will speak the actual value, not just summary
+        // Use detailed mode to read complete structure like manual mode does
         await fetch(`/api/session/${sessionId}/line/${lineId}/explore`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
@@ -1129,7 +1216,8 @@
             variable: varName,
             path: path,
             speak: true,
-            is_changes: false
+            is_changes: false,
+            mode: 'detailed'  // Use the same detailed reading as manual mode
           })
         });
       }
@@ -1143,7 +1231,7 @@
       // ========== CHANGES EXPLORER FUNCTIONS ==========
       async function exploreChanges() {
         if (!selected) return;
-        const lineId = selected.dataset.lineId;
+        const lineId = selected.dataset.id;
         if (!lineId) return;
         
         const response = await fetch(`/api/session/${sessionId}/line/${lineId}/variables`);
@@ -1165,8 +1253,7 @@
           return;
         }
         
-        // Speak the changes summary first
-        await fetch(`/api/session/${sessionId}/line/${lineId}/variables?speak=true&mode=changes`);
+        // DON'T speak the changes summary yet - wait for user to select a scope
         
         // Reset state
         changesExplorerMode = 'scopes';
@@ -1179,14 +1266,48 @@
         displayChangesScopesOrChanges();
         
         // Announce navigation instructions
-        await fetch('/api/tts/speak', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            text: "Press 0 through 9 to select a scope with changes. Press Q to quit.",
-            interrupt: false
-          })
-        });
+        await announceChangesScopeInstructions();
+      }
+      
+      async function announceChangesScopeInstructions() {
+        // Get available scopes with changes
+        const scopes = [];
+        for (const [scopeName, scopeChanges] of Object.entries(changesData)) {
+          if (typeof scopeChanges === 'object' && !scopeName.startsWith('_')) {
+            const changeCount = Object.keys(scopeChanges).filter(k => !k.startsWith('_')).length;
+            if (changeCount > 0) {
+              scopes.push(scopeName);
+            }
+          }
+        }
+        
+        if (scopes.length === 0) {
+          await fetch('/api/tts/speak', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              text: "No local or global changes available.",
+              interrupt: false
+            })
+          });
+        } else {
+          let instruction = "";
+          scopes.forEach((scope, idx) => {
+            if (idx > 0) instruction += " or ";
+            const scopeLabel = scope.toLowerCase().includes('global') ? 'Global' : 'Local';
+            instruction += `press ${idx} for ${scopeLabel} changes`;
+          });
+          instruction += ". Press Q to quit.";
+          
+          await fetch('/api/tts/speak', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              text: instruction,
+              interrupt: false
+            })
+          });
+        }
       }
       
       function displayChangesScopesOrChanges() {
@@ -1210,6 +1331,12 @@
               scopes.push({name: scopeName, count: changeCount, changes: scopeChanges});
             }
           }
+        }
+        
+        // If no scopes available, close the modal
+        if (scopes.length === 0) {
+          document.getElementById('changes-modal').style.display = 'none';
+          return;
         }
         
         // Update header
@@ -1394,12 +1521,12 @@
       
       async function exploreChange(changeName, changeValue, scope) {
         if (!selected) return;
-        const lineId = selected.dataset.lineId;
+        const lineId = selected.dataset.id;
         
         // Store for repeat functionality
         lastSpokenChange = {name: changeName, value: changeValue, scope: scope, lineId};
         
-        // Use the explore endpoint to speak this specific change
+        // Use detailed mode to read complete structure like manual mode does
         await fetch(`/api/session/${sessionId}/line/${lineId}/explore`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
@@ -1407,7 +1534,8 @@
             variable: changeName,
             path: scope ? [scope] : [],  // Include scope in path if available
             is_changes: true,  // Flag to indicate we're exploring changes
-            speak: true
+            speak: true,
+            mode: 'detailed'  // Use the same detailed reading as manual mode
           })
         });
       }
@@ -1416,6 +1544,177 @@
         if (lastSpokenChange) {
           await exploreChange(lastSpokenChange.name, lastSpokenChange.value, lastSpokenChange.scope);
         }
+      }
+      
+      // ========== BLOCK EXPLORER FUNCTIONS ==========
+      let currentBlockPage = 0;
+      let totalBlockPages = 1;
+      let currentBlocks = [];
+      
+      async function exploreFunctionBlocks() {
+        if (!selected) return;
+        const lineId = selected.dataset.id;
+        if (!lineId) return;
+        
+        // Get blocks with announcement
+        const response = await fetch(`/api/session/${sessionId}/line/${lineId}/blocks?announce=true`);
+        const data = await response.json();
+        
+        if (data.error) {
+          await fetch('/api/tts/speak', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({text: data.error, interrupt: true})
+          });
+          return;
+        }
+        
+        currentBlocks = data.blocks;
+        currentBlockPage = data.current_page;
+        totalBlockPages = data.total_pages;
+        
+        // Display modal
+        document.getElementById('block-modal').style.display = 'block';
+        displayBlocksPage();
+      }
+      
+      function displayBlocksPage() {
+        const blockList = document.getElementById('block-list');
+        blockList.innerHTML = '';
+        
+        // Update header
+        document.getElementById('block-page-num').textContent = currentBlockPage + 1;
+        document.getElementById('block-page-total').textContent = totalBlockPages;
+        document.getElementById('block-total-count').textContent = currentBlocks.length;
+        
+        // Display blocks with full code visible
+        currentBlocks.forEach((block, idx) => {
+          const div = document.createElement('div');
+          div.style.cssText = 'margin: 8px 0; border: 2px solid #10b981; border-radius: 8px; overflow: hidden;';
+          div.dataset.index = idx;
+          
+          // Header with number badge
+          const header = document.createElement('div');
+          header.style.cssText = 'padding: 8px 12px; background: #ecfdf5; border-bottom: 1px solid #10b981; display: flex; align-items: center; cursor: pointer;';
+          header.innerHTML = `
+            <span style="display: inline-block; width: 28px; height: 28px; background: #10b981; color: white; border-radius: 50%; text-align: center; line-height: 28px; margin-right: 12px; font-weight: bold; font-size: 14px;">${idx}</span>
+            <span style="font-weight: 600; color: #047857;">Block ${idx}</span>
+          `;
+          header.onclick = () => selectBlock(idx);
+          
+          // Code content
+          const codeDiv = document.createElement('div');
+          codeDiv.style.cssText = 'padding: 12px; background: #f0fdf4; font-family: monospace; font-size: 12px; color: #1f2937; white-space: pre-wrap; word-break: break-word; line-height: 1.5;';
+          codeDiv.textContent = block.full_text;
+          
+          div.appendChild(header);
+          div.appendChild(codeDiv);
+          blockList.appendChild(div);
+        });
+        
+        // Highlight first block
+        if (currentBlocks.length > 0) {
+          highlightBlockAtIndex(0);
+        }
+      }
+      
+      function highlightBlockAtIndex(index) {
+        const items = document.querySelectorAll('#block-list > div');
+        items.forEach((item, idx) => {
+          if (idx === index) {
+            item.style.borderColor = '#059669';
+            item.style.boxShadow = '0 0 0 3px rgba(16, 185, 129, 0.3)';
+            // Highlight the header more prominently
+            const header = item.querySelector('div:first-child');
+            if (header) {
+              header.style.background = '#10b981';
+              header.style.color = 'white';
+              const blockLabel = header.querySelector('span:last-child');
+              if (blockLabel) blockLabel.style.color = 'white';
+            }
+          } else {
+            item.style.borderColor = '#10b981';
+            item.style.boxShadow = 'none';
+            // Reset header
+            const header = item.querySelector('div:first-child');
+            if (header) {
+              header.style.background = '#ecfdf5';
+              header.style.color = 'inherit';
+              const blockLabel = header.querySelector('span:last-child');
+              if (blockLabel) blockLabel.style.color = '#047857';
+            }
+          }
+        });
+      }
+      
+      async function selectBlock(index) {
+        if (!selected) return;
+        const lineId = selected.dataset.id;
+        
+        // Send selection to backend
+        await fetch(`/api/session/${sessionId}/line/${lineId}/blocks`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            action: 'select',
+            index: index
+          })
+        });
+        
+        highlightBlockAtIndex(index);
+      }
+      
+      async function nextBlockPage() {
+        if (!selected) return;
+        const lineId = selected.dataset.id;
+        
+        const response = await fetch(`/api/session/${sessionId}/line/${lineId}/blocks`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({action: 'next'})
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          currentBlocks = data.blocks;
+          currentBlockPage = data.current_page;
+          displayBlocksPage();
+        }
+      }
+      
+      async function prevBlockPage() {
+        if (!selected) return;
+        const lineId = selected.dataset.id;
+        
+        const response = await fetch(`/api/session/${sessionId}/line/${lineId}/blocks`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({action: 'previous'})
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          currentBlocks = data.blocks;
+          currentBlockPage = data.current_page;
+          displayBlocksPage();
+        }
+      }
+      
+      function closeBlockModal() {
+        document.getElementById('block-modal').style.display = 'none';
+        currentBlocks = [];
+        currentBlockPage = 0;
+      }
+      
+      function escapeHtml(text) {
+        const map = {
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#039;'
+        };
+        return text.replace(/[&<>"']/g, m => map[m]);
       }
       
       function closeFunctionModal() {
@@ -1428,6 +1727,9 @@
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
           return;
         }
+        
+        // Debug log
+        console.log(`Key pressed: ${e.key}, selected:`, selected ? 'yes' : 'no', 'rows:', rows.length);
         
         // Speed control - always available
         if (e.key.toLowerCase() === 's' && !e.shiftKey) {
@@ -1443,6 +1745,12 @@
           return;
         }
         
+        // Check if any modal is open
+        const modalOpen = document.getElementById('function-modal').style.display === 'block' ||
+                         document.getElementById('variable-modal').style.display === 'block' ||
+                         document.getElementById('changes-modal').style.display === 'block' ||
+                         document.getElementById('block-modal').style.display === 'block';
+        
         // Navigation
         if (e.key === 'ArrowUp') {
           e.preventDefault();
@@ -1452,6 +1760,16 @@
           e.preventDefault();
           const idx = rows.indexOf(selected);
           if (idx < rows.length - 1) selectRow(rows[idx + 1]);
+        } else if (e.key === 'Enter' && !modalOpen) {
+          e.preventDefault();
+          const idx = rows.indexOf(selected);
+          if (e.shiftKey) {
+            // Shift+Enter goes backwards
+            if (idx > 0) selectRow(rows[idx - 1]);
+          } else {
+            // Enter moves to next row only when no modal is open
+            if (idx < rows.length - 1) selectRow(rows[idx + 1]);
+          }
         }
         
         // Audio controls
@@ -1464,6 +1782,7 @@
           closeFunctionModal();
           closeVariableModal();
           closeChangesModal();
+          closeBlockModal();
         }
         
         // Function exploration
@@ -1475,7 +1794,7 @@
           speakFunction(false);
         } else if (e.key.toLowerCase() === 'p') {
           e.preventDefault();
-          speakFunction(true);
+          exploreFunctionBlocks();  // Changed: 'p' now opens block explorer
         }
         
         // Variable exploration
@@ -1495,9 +1814,6 @@
           if (e.key.toLowerCase() === 'f') {
             e.preventDefault();
             speakFunction(false);
-          } else if (e.key.toLowerCase() === 'p') {
-            e.preventDefault();
-            speakFunction(true);
           } else if (e.key === 'q' || e.key === 'Escape') {
             e.preventDefault();
             closeFunctionModal();
@@ -1584,6 +1900,41 @@
           }
         }
         
+        // Block explorer navigation
+        if (document.getElementById('block-modal').style.display === 'block') {
+          // Number keys 0-9 for block selection
+          if (e.key >= '0' && e.key <= '9') {
+            e.preventDefault();
+            const num = parseInt(e.key);
+            if (num < currentBlocks.length) {
+              selectBlock(num);
+            }
+          }
+          // Navigation
+          else if (e.key === 'n') {
+            e.preventDefault();
+            nextBlockPage();
+          } else if (e.key === 'p' && !e.shiftKey) {
+            e.preventDefault();
+            prevBlockPage();
+          }
+          // Speed control
+          else if (e.key === 's') {
+            e.preventDefault();
+            // Change speed
+            const speeds = ['slow', 'medium', 'fast'];
+            const currentIdx = speeds.indexOf(speedSelect.value);
+            const nextIdx = (currentIdx + 1) % speeds.length;
+            speedSelect.value = speeds[nextIdx];
+            speedSelect.dispatchEvent(new Event('change'));
+          }
+          // Close modal
+          else if (e.key === 'q' || e.key === 'Escape') {
+            e.preventDefault();
+            closeBlockModal();
+          }
+        }
+        
         // Variable explorer navigation
         if (document.getElementById('variable-modal').style.display === 'block') {
           const items = document.querySelectorAll('#variable-list > div:not(:first-child)'); // Exclude back button if present
@@ -1662,11 +2013,37 @@
           // Extract line ID from the row (assuming it's in the first cell or data attribute)
           const cells = row.querySelectorAll('td');
           if (cells.length > 0) {
-            row.dataset.lineId = cells[0].textContent.trim();
+            row.dataset.id = cells[0].textContent.trim();
           }
         }
       };
     })();
+    
+    // Ensure keyboard shortcuts work on page load
+    window.addEventListener('DOMContentLoaded', () => {
+      // Force focus and simulate a click to activate keyboard handlers
+      setTimeout(() => {
+        const tableContainer = document.querySelector('.table-container');
+        const firstRow = document.querySelector('tbody tr');
+        
+        if (firstRow && !selected) {
+          // If no row is selected yet, select the first one
+          selectRow(firstRow);
+        }
+        
+        if (tableContainer) {
+          tableContainer.setAttribute('tabindex', '0');
+          tableContainer.focus();
+          // Simulate a click to ensure focus is properly set
+          tableContainer.click();
+          console.log('Page loaded - focus set and clicked table container');
+        }
+        
+        // Also try focusing the document body as a fallback
+        document.body.setAttribute('tabindex', '0');
+        document.body.focus();
+      }, 300);
+    });
   </script>
 </body>
 </html>

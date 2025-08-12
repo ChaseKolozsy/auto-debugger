@@ -32,6 +32,7 @@ from .common import extract_function_context, summarize_delta, summarize_value, 
 from .db import DEFAULT_DB_PATH, LineReportStore
 from .nested_explorer import NestedValueExplorer
 from .syntax_to_speech import syntax_to_speech_code, syntax_to_speech_value
+from .function_blocks import FunctionBlockExplorer
 
 
 class AudioTTS:
@@ -866,6 +867,150 @@ def create_unified_app(db_path: Optional[str] = None) -> Flask:
         
         return jsonify(func_ctx)
     
+    @app.route("/api/session/<session_id>/line/<line_id>/blocks", methods=["GET", "POST"])
+    def explore_function_blocks(session_id: str, line_id: str):
+        """Explore function blocks with pagination and numbered selection."""
+        interface.store.open()
+        conn = interface.store.conn
+        assert conn is not None
+        
+        cur = conn.cursor()
+        cur.execute("SELECT file, line_number FROM line_reports WHERE session_id=? AND id=?",
+                   (session_id, line_id))
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"error": "Line not found"}), 404
+        
+        file_path, line_no = row
+        func_ctx = interface.get_function_context(file_path, line_no, session_id)
+        
+        if not func_ctx.get("body"):
+            return jsonify({"error": "No function body available"}), 404
+        
+        # Create block explorer
+        if not hasattr(interface, 'block_explorer') or request.method == "GET":
+            interface.block_explorer = FunctionBlockExplorer(func_ctx["body"], interface.tts)
+        
+        explorer = interface.block_explorer
+        
+        if request.method == "GET":
+            # Get current page info
+            page_blocks = explorer.get_current_page_blocks()
+            blocks_info = []
+            for idx, block in page_blocks:
+                # Get first line as preview
+                lines = block.split('\n')
+                preview = lines[0].strip() if lines else ""
+                if len(preview) > 60:
+                    preview = preview[:57] + "..."
+                blocks_info.append({
+                    "index": idx,
+                    "preview": preview,
+                    "full_text": block
+                })
+            
+            # Announce page info if requested
+            if request.args.get("announce") == "true":
+                if not interface.tts:
+                    interface.tts = AudioTTS(verbose=True)
+                announcement = explorer.announce_page_info()
+                interface.tts.speak(announcement, interrupt=True)
+            
+            return jsonify({
+                "blocks": blocks_info,
+                "current_page": explorer.current_page,
+                "total_pages": explorer.total_pages,
+                "total_blocks": len(explorer.blocks),
+                "page_info": explorer.announce_page_info()
+            })
+        
+        elif request.method == "POST":
+            # Handle actions: select block, next page, previous page
+            action = request.json.get("action")
+            
+            if action == "select":
+                index = request.json.get("index", 0)
+                block = explorer.select_block(index)
+                if block:
+                    if not interface.tts:
+                        interface.tts = AudioTTS(verbose=True)
+                    # Speak the block
+                    interface.tts.speak(f"Block {index}: {block}", interrupt=True)
+                    return jsonify({"success": True, "block": block})
+                else:
+                    return jsonify({"error": "Invalid block index"}), 400
+            
+            elif action == "next":
+                if explorer.next_page():
+                    # Get new page info and announce
+                    if not interface.tts:
+                        interface.tts = AudioTTS(verbose=True)
+                    announcement = explorer.announce_page_info()
+                    interface.tts.speak(announcement, interrupt=True)
+                    
+                    # Return updated page info
+                    page_blocks = explorer.get_current_page_blocks()
+                    blocks_info = []
+                    for idx, block in page_blocks:
+                        lines = block.split('\n')
+                        preview = lines[0].strip() if lines else ""
+                        if len(preview) > 60:
+                            preview = preview[:57] + "..."
+                        blocks_info.append({
+                            "index": idx,
+                            "preview": preview,
+                            "full_text": block
+                        })
+                    
+                    return jsonify({
+                        "blocks": blocks_info,
+                        "current_page": explorer.current_page,
+                        "total_pages": explorer.total_pages,
+                        "page_info": explorer.announce_page_info()
+                    })
+                else:
+                    if not interface.tts:
+                        interface.tts = AudioTTS(verbose=True)
+                    interface.tts.speak("Already at last page", interrupt=True)
+                    return jsonify({"error": "Already at last page"}), 400
+            
+            elif action == "previous":
+                if explorer.previous_page():
+                    # Get new page info and announce
+                    if not interface.tts:
+                        interface.tts = AudioTTS(verbose=True)
+                    announcement = explorer.announce_page_info()
+                    interface.tts.speak(announcement, interrupt=True)
+                    
+                    # Return updated page info
+                    page_blocks = explorer.get_current_page_blocks()
+                    blocks_info = []
+                    for idx, block in page_blocks:
+                        lines = block.split('\n')
+                        preview = lines[0].strip() if lines else ""
+                        if len(preview) > 60:
+                            preview = preview[:57] + "..."
+                        blocks_info.append({
+                            "index": idx,
+                            "preview": preview,
+                            "full_text": block
+                        })
+                    
+                    return jsonify({
+                        "blocks": blocks_info,
+                        "current_page": explorer.current_page,
+                        "total_pages": explorer.total_pages,
+                        "page_info": explorer.announce_page_info()
+                    })
+                else:
+                    if not interface.tts:
+                        interface.tts = AudioTTS(verbose=True)
+                    interface.tts.speak("Already at first page", interrupt=True)
+                    return jsonify({"error": "Already at first page"}), 400
+            
+            else:
+                return jsonify({"error": "Invalid action"}), 400
+    
     @app.route("/api/session/<session_id>/line/<line_id>/variables", methods=["GET"])
     def get_variables_detailed(session_id: str, line_id: str):
         """Get detailed variables for exploration."""
@@ -907,13 +1052,14 @@ def create_unified_app(db_path: Optional[str] = None) -> Flask:
     
     @app.route("/api/session/<session_id>/line/<line_id>/explore", methods=["POST"])
     def explore_variable(session_id: str, line_id: str):
-        """Simple variable speaking - just announces the value."""
+        """Explore a variable using the same logic as manual mode - read complete structure."""
         interface.store.open()
         conn = interface.store.conn
         assert conn is not None
         
         var_name = request.json.get("variable")
         var_path = request.json.get("path", [])  # For scope navigation
+        mode = request.json.get("mode", "summary")  # "summary" or "detailed"
         
         cur = conn.cursor()
         cur.execute("SELECT variables, variables_delta FROM line_reports WHERE session_id=? AND id=?",
@@ -944,20 +1090,29 @@ def create_unified_app(db_path: Optional[str] = None) -> Flask:
         if var_name and isinstance(target, dict):
             value = target.get(var_name)
             
-            # Initialize TTS if needed
+            # Initialize TTS and explorer if needed
             if not interface.tts:
                 interface.tts = AudioTTS(verbose=True)
             
-            # Speak the value directly (simple announcement)
+            if not interface.explorer:
+                interface.explorer = NestedValueExplorer(interface.tts, verbose=True)
+            
+            # Speak the value using the same method as manual mode
             if request.json.get("speak", True):
-                summary = summarize_value(value) if isinstance(value, (dict, list)) else str(value)
-                interface.tts.speak(f"{var_name}: {summary}", interrupt=True)
+                if mode == "detailed":
+                    # Use the same read_complete_structure method from manual mode
+                    interface.explorer.read_complete_structure(var_name, value)
+                else:
+                    # Simple summary
+                    summary = summarize_value(value) if isinstance(value, (dict, list)) else str(value)
+                    interface.tts.speak(f"{var_name}: {summary}", interrupt=True)
             
             return jsonify({
                 "name": var_name,
                 "value": value,
                 "summary": summarize_value(value),
-                "type": type(value).__name__ if value is not None else "None"
+                "type": type(value).__name__ if value is not None else "None",
+                "mode": mode
             })
         
         return jsonify({"error": "Variable not found"}), 404
