@@ -182,9 +182,18 @@
     <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 12px; padding: 24px; max-width: 80%; max-height: 80%; overflow: auto; box-shadow: 0 20px 40px rgba(0,0,0,0.2);">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
         <h3 id="function-title" style="margin: 0;">Function Code</h3>
-        <button onclick="document.getElementById('function-modal').style.display='none'" style="background: #ef4444; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer;">✕</button>
+        <button onclick="closeFunctionModal()" style="background: #ef4444; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">✕ Close (Q)</button>
       </div>
-      <pre id="function-code" style="background: #f6f8fa; padding: 16px; border-radius: 8px; overflow-x: auto;"></pre>
+      <div style="margin-bottom: 12px;">
+        <button onclick="speakFunction(false)" style="padding: 6px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 8px;">🔊 Speak Signature (F)</button>
+        <button onclick="speakFunction(true)" style="padding: 6px 12px; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer;">🔊 Speak Full Function (P)</button>
+      </div>
+      <pre id="function-code" style="background: #f6f8fa; padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 13px; line-height: 1.5;"></pre>
+      <div style="margin-top: 12px; padding: 8px; background: #eff6ff; border-radius: 6px;">
+        <div style="font-size: 12px; color: #1e40af;">
+          <strong>Shortcuts:</strong> F = Speak signature | P = Speak full | Q/Esc = Close
+        </div>
+      </div>
     </div>
   </div>
 
@@ -210,6 +219,33 @@
           • <kbd>n</kbd> Next page | <kbd>p</kbd> Previous page<br>
           • <kbd>q</kbd> or <kbd>Esc</kbd> to close explorer<br>
           • <kbd>r</kbd> Repeat last spoken variable
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Changes Explorer Modal -->
+  <div id="changes-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000;">
+    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 12px; padding: 24px; max-width: 70%; width: 600px; max-height: 80%; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.2);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3 style="margin: 0;">Changes Explorer</h3>
+        <button id="close-changes-modal-btn" onclick="closeChangesModal()" style="background: #ef4444; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">✕ Close (Q)</button>
+      </div>
+      <div style="background: #f3f4f6; padding: 8px; border-radius: 6px; margin-bottom: 12px;">
+        <div style="font-size: 13px; color: #374151; font-weight: 600;">
+          Page <span id="changes-page-num">1</span> of <span id="changes-page-total">1</span> | 
+          Total changes: <span id="changes-total-count">0</span>
+        </div>
+      </div>
+      <div id="changes-list" style="max-height: 350px; overflow-y: auto; margin-bottom: 12px;"></div>
+      <div style="background: #fef3c7; padding: 12px; border-radius: 6px; border: 1px solid #f59e0b;">
+        <div style="font-size: 13px; color: #92400e; line-height: 1.6;">
+          <strong>Controls:</strong><br>
+          • Press <kbd>0-9</kbd> to select and hear change by number<br>
+          • <kbd>↑/↓</kbd> or <kbd>j/k</kbd> to navigate | <kbd>Enter</kbd> to select<br>
+          • <kbd>n</kbd> Next page | <kbd>p</kbd> Previous page<br>
+          • <kbd>q</kbd> or <kbd>Esc</kbd> to close explorer<br>
+          • <kbd>r</kbd> Repeat last spoken change
         </div>
       </div>
     </div>
@@ -743,6 +779,13 @@
       let varsPerPage = 10;
       let lastSpokenVariable = null;
       
+      // Changes explorer state
+      let allChanges = [];
+      let currentChangesPage = 0;
+      let changesPerPage = 10;
+      let lastSpokenChange = null;
+      let changesExplorerIndex = 0;
+      
       // Audio controls
       const playPauseBtn = document.getElementById('btn-play-pause');
       const stopBtn = document.getElementById('btn-stop');
@@ -980,6 +1023,170 @@
         }
       }
       
+      // ========== CHANGES EXPLORER FUNCTIONS ==========
+      async function exploreChanges() {
+        if (!selected) return;
+        const lineId = selected.dataset.lineId;
+        if (!lineId) return;
+        
+        const response = await fetch(`/api/session/${sessionId}/line/${lineId}/variables`);
+        const data = await response.json();
+        const changes = data.changes || {};
+        
+        // Get all changes
+        allChanges = [];
+        for (const [key, value] of Object.entries(changes)) {
+          if (!key.startsWith('_')) {
+            allChanges.push({name: key, value: value, type: 'changed'});
+          }
+        }
+        
+        // If no changes, show message
+        if (allChanges.length === 0) {
+          await stopAudio();
+          await fetch('/api/tts/stop', {method: 'POST'});
+          // Speak "no changes"
+          const speakResponse = await fetch(`/api/session/${sessionId}/line/${lineId}/variables?speak=true&mode=changes`);
+          return;
+        }
+        
+        // Reset pagination
+        currentChangesPage = 0;
+        changesExplorerIndex = 0;
+        
+        // Display the modal and first page
+        document.getElementById('changes-modal').style.display = 'block';
+        displayChangesPage();
+      }
+      
+      function displayChangesPage() {
+        const changesList = document.getElementById('changes-list');
+        changesList.innerHTML = '';
+        
+        const startIdx = currentChangesPage * changesPerPage;
+        const endIdx = Math.min(startIdx + changesPerPage, allChanges.length);
+        const pageChanges = allChanges.slice(startIdx, endIdx);
+        
+        // Update pagination info
+        const totalPages = Math.ceil(allChanges.length / changesPerPage);
+        document.getElementById('changes-page-num').textContent = currentChangesPage + 1;
+        document.getElementById('changes-page-total').textContent = totalPages;
+        document.getElementById('changes-total-count').textContent = allChanges.length;
+        
+        pageChanges.forEach((change, idx) => {
+          const displayNum = idx;
+          const div = document.createElement('div');
+          div.style.cssText = 'padding: 10px; margin: 6px 0; border: 2px solid #fbbf24; border-radius: 8px; cursor: pointer; display: flex; align-items: center; background: #fffbeb;';
+          div.dataset.index = startIdx + idx;
+          div.dataset.pageIndex = idx;
+          div.dataset.changeName = change.name;
+          
+          // Add number indicator
+          const numBadge = `<span style="display: inline-block; width: 24px; height: 24px; background: #f59e0b; color: white; border-radius: 50%; text-align: center; line-height: 24px; margin-right: 12px; font-weight: bold; flex-shrink: 0;">${displayNum}</span>`;
+          
+          // Format value preview
+          let valuePreview = JSON.stringify(change.value);
+          if (valuePreview.length > 80) {
+            valuePreview = valuePreview.substring(0, 77) + '...';
+          }
+          
+          // Change indicator
+          const changeIcon = '🔄';
+          
+          div.innerHTML = `
+            ${numBadge}
+            <div style="flex: 1; min-width: 0;">
+              <div style="font-weight: 600; color: #92400e; font-size: 14px;">
+                ${changeIcon} ${change.name}
+              </div>
+              <div style="font-size: 12px; color: #78350f; margin-top: 2px;">
+                <span style="font-family: monospace;">${valuePreview}</span>
+              </div>
+            </div>
+          `;
+          
+          div.onclick = () => {
+            highlightChangeAtIndex(idx);
+            exploreChange(change.name, change.value);
+          };
+          changesList.appendChild(div);
+        });
+        
+        // Highlight first item on new page
+        if (pageChanges.length > 0) {
+          highlightChangeAtIndex(0);
+        }
+      }
+      
+      function closeChangesModal() {
+        document.getElementById('changes-modal').style.display = 'none';
+        allChanges = [];
+        currentChangesPage = 0;
+        changesExplorerIndex = 0;
+      }
+      
+      function highlightChangeAtIndex(pageIndex) {
+        const items = document.querySelectorAll('#changes-list > div');
+        items.forEach((item, idx) => {
+          if (idx === pageIndex) {
+            item.style.background = '#fef3c7';
+            item.style.borderColor = '#f59e0b';
+            item.style.boxShadow = '0 0 0 3px rgba(245, 158, 11, 0.2)';
+          } else {
+            item.style.background = '#fffbeb';
+            item.style.borderColor = '#fbbf24';
+            item.style.boxShadow = 'none';
+          }
+        });
+        changesExplorerIndex = pageIndex;
+      }
+      
+      function nextChangesPage() {
+        const totalPages = Math.ceil(allChanges.length / changesPerPage);
+        if (currentChangesPage < totalPages - 1) {
+          currentChangesPage++;
+          changesExplorerIndex = 0;
+          displayChangesPage();
+        }
+      }
+      
+      function prevChangesPage() {
+        if (currentChangesPage > 0) {
+          currentChangesPage--;
+          changesExplorerIndex = 0;
+          displayChangesPage();
+        }
+      }
+      
+      async function exploreChange(changeName, changeValue) {
+        if (!selected) return;
+        const lineId = selected.dataset.lineId;
+        
+        // Store for repeat functionality
+        lastSpokenChange = {name: changeName, value: changeValue, lineId};
+        
+        // Use the explore endpoint to speak this specific change
+        await fetch(`/api/session/${sessionId}/line/${lineId}/explore`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            variable: changeName,
+            path: [],  // Changes are at root level
+            speak: true
+          })
+        });
+      }
+      
+      async function repeatLastChange() {
+        if (lastSpokenChange) {
+          await exploreChange(lastSpokenChange.name, lastSpokenChange.value);
+        }
+      }
+      
+      function closeFunctionModal() {
+        document.getElementById('function-modal').style.display = 'none';
+      }
+      
       // Keyboard shortcuts
       document.addEventListener('keydown', async (e) => {
         // Don't trigger shortcuts when typing in inputs
@@ -1005,8 +1212,9 @@
         } else if (e.key === 'Escape') {
           e.preventDefault();
           stopAudio();
-          document.getElementById('function-modal').style.display = 'none';
-          document.getElementById('variable-modal').style.display = 'none';
+          closeFunctionModal();
+          closeVariableModal();
+          closeChangesModal();
         }
         
         // Function exploration
@@ -1030,7 +1238,7 @@
           exploreVariables();
         } else if (e.key.toLowerCase() === 'e') {
           e.preventDefault();
-          speakVariables('changes');
+          exploreChanges();
         }
         
         // Speed control
@@ -1041,6 +1249,74 @@
           const nextIndex = (currentIndex + 1) % speeds.length;
           speedSelect.value = speeds[nextIndex];
           speedSelect.dispatchEvent(new Event('change'));
+        }
+        
+        // Function modal navigation
+        if (document.getElementById('function-modal').style.display === 'block') {
+          if (e.key.toLowerCase() === 'f') {
+            e.preventDefault();
+            speakFunction(false);
+          } else if (e.key.toLowerCase() === 'p') {
+            e.preventDefault();
+            speakFunction(true);
+          } else if (e.key === 'q' || e.key === 'Escape') {
+            e.preventDefault();
+            closeFunctionModal();
+          }
+        }
+        
+        // Changes explorer navigation
+        if (document.getElementById('changes-modal').style.display === 'block') {
+          const items = document.querySelectorAll('#changes-list > div');
+          
+          // Number keys 0-9 for direct selection
+          if (e.key >= '0' && e.key <= '9') {
+            e.preventDefault();
+            const num = parseInt(e.key);
+            if (num < items.length) {
+              const item = items[num];
+              highlightChangeAtIndex(num);
+              const changeName = item.dataset.changeName;
+              const change = allChanges[currentChangesPage * changesPerPage + num];
+              if (change) {
+                exploreChange(change.name, change.value);
+              }
+            }
+          }
+          // Navigation keys
+          else if ((e.key === 'ArrowUp' || e.key === 'k') && changesExplorerIndex > 0) {
+            e.preventDefault();
+            highlightChangeAtIndex(changesExplorerIndex - 1);
+          } else if ((e.key === 'ArrowDown' || e.key === 'j') && changesExplorerIndex < items.length - 1) {
+            e.preventDefault();
+            highlightChangeAtIndex(changesExplorerIndex + 1);
+          }
+          // Select current item
+          else if (e.key === 'Enter' && items[changesExplorerIndex]) {
+            e.preventDefault();
+            const change = allChanges[currentChangesPage * changesPerPage + changesExplorerIndex];
+            if (change) {
+              exploreChange(change.name, change.value);
+            }
+          }
+          // Pagination
+          else if (e.key === 'n') {
+            e.preventDefault();
+            nextChangesPage();
+          } else if (e.key === 'p' && e.key !== 'P') {
+            e.preventDefault();
+            prevChangesPage();
+          }
+          // Close modal
+          else if (e.key === 'q' || e.key === 'Escape') {
+            e.preventDefault();
+            closeChangesModal();
+          }
+          // Repeat last change
+          else if (e.key === 'r') {
+            e.preventDefault();
+            repeatLastChange();
+          }
         }
         
         // Variable explorer navigation
