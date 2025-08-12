@@ -325,6 +325,9 @@ class NestedValueExplorer:
         For nested: reads the entire structure recursively with brackets
         """
         announcement = f"{name} equals {self._format_for_detailed_speech(value)}"
+        # Stop any currently playing audio before starting new speech
+        if hasattr(self.tts, 'stop'):
+            self.tts.stop()
         self.tts.speak(announcement)
         print(f"[TTS] {announcement}")
         self._wait_for_speech()
