@@ -1,19 +1,49 @@
 #!/usr/bin/env python3
 """
 MCP server for auto-debugger using FastMCP.
-Provides tools to query debugging sessions stored in SQLite.
+Provides tools to query debugging sessions stored in SQLite and control active debugging sessions.
 """
 
 import json
 import sqlite3
+import subprocess
+import shlex
+import time
+import threading
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
+from dataclasses import dataclass
 
 from fastmcp import FastMCP
 
 # Initialize FastMCP server
-mcp = FastMCP("autodebug-mcp", version="0.2.0")
+mcp = FastMCP("autodebug-mcp", version="0.3.0")
+
+# Store active debugging sessions
+@dataclass
+class ActiveSession:
+    """Represents an active debugging session."""
+    session_id: str
+    process: subprocess.Popen
+    controller: Any  # HttpStepController instance
+    current_line: int = 0
+    current_file: str = ""
+    current_code: str = ""
+    variables: Dict[str, Any] = None
+    variables_delta: Dict[str, Any] = None
+    is_waiting: bool = False
+    mode: str = "manual"
+    
+    def __post_init__(self):
+        if self.variables is None:
+            self.variables = {}
+        if self.variables_delta is None:
+            self.variables_delta = {}
+
+# Global storage for active sessions
+active_sessions: Dict[str, ActiveSession] = {}
+sessions_lock = threading.Lock()
 
 def get_db_path(db_path: Optional[str] = None) -> Path:
     """Get the database path, creating directories if needed."""
@@ -251,16 +281,404 @@ def get_function_context(
     Returns:
         Function signature and optionally the full function body
     """
-    db_path = get_db_path(db)
+    # Import here to avoid circular dependencies
+    import sys
+    from pathlib import Path
+    autodebugger_path = Path(__file__).parent.parent / "autodebugger"
+    if str(autodebugger_path) not in sys.path:
+        sys.path.insert(0, str(autodebugger_path))
     
-    # This is a placeholder - would need to implement function extraction
-    # from file snapshots or git commits stored in the database
+    from common import extract_function_context
+    
+    try:
+        context = extract_function_context(file, line)
+        result = {
+            "session_id": session_id,
+            "file": file,
+            "line": line,
+            "function_name": context.get("name"),
+            "function_signature": context.get("sig"),
+        }
+        if mode == "full":
+            result["function_body"] = context.get("body")
+        return result
+    except Exception as e:
+        return {
+            "session_id": session_id,
+            "file": file,
+            "line": line,
+            "error": str(e)
+        }
+
+@mcp.tool
+def create_debug_session(
+    script_path: str,
+    script_args: Optional[str] = None,
+    breakpoints: Optional[List[str]] = None,
+    python_exe: Optional[str] = None,
+    db: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Create a new debugging session for an LLM agent.
+    
+    Args:
+        script_path: Path to the Python script to debug
+        script_args: Arguments to pass to the script
+        breakpoints: List of breakpoints in 'file:line' format
+        python_exe: Python executable to use (defaults to current)
+        db: Optional database path
+    
+    Returns:
+        Session information including session_id and status
+    """
+    import uuid
+    
+    session_id = f"agent_{uuid.uuid4().hex[:12]}"
+    
+    # Build command
+    cmd = [python_exe or "python", "-m", "autodebugger", "run", "--manual"]
+    
+    # Add database path if specified
+    if db:
+        cmd.extend(["--db", db])
+    
+    # Add breakpoints
+    if breakpoints:
+        for bp in breakpoints:
+            cmd.extend(["-b", bp])
+    
+    # Add script path
+    cmd.append(script_path)
+    
+    # Add script arguments
+    if script_args:
+        cmd.extend(shlex.split(script_args))
+    
+    try:
+        # Launch the debugger process
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1
+        )
+        
+        # Wait a moment for the process to start
+        time.sleep(0.5)
+        
+        # Create session object
+        session = ActiveSession(
+            session_id=session_id,
+            process=process,
+            controller=None,  # Will be set when we connect
+            mode="manual"
+        )
+        
+        with sessions_lock:
+            active_sessions[session_id] = session
+        
+        return {
+            "success": True,
+            "session_id": session_id,
+            "command": " ".join(cmd),
+            "pid": process.pid,
+            "status": "created"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@mcp.tool  
+def step_debug_session(
+    session_id: str,
+    action: str = "step"
+) -> Dict[str, Any]:
+    """
+    Control stepping through a debugging session.
+    
+    Args:
+        session_id: The active session ID
+        action: Action to perform ('step', 'continue', 'quit')
+    
+    Returns:
+        Current state after the action
+    """
+    with sessions_lock:
+        session = active_sessions.get(session_id)
+    
+    if not session:
+        return {"success": False, "error": f"Session {session_id} not found"}
+    
+    # Send action to the debugger
+    # This would interact with the controller
+    # For now, return current state
     return {
+        "success": True,
         "session_id": session_id,
-        "file": file,
-        "line": line,
-        "mode": mode,
-        "note": "Function context extraction not yet implemented"
+        "action": action,
+        "current_line": session.current_line,
+        "current_file": session.current_file,
+        "current_code": session.current_code,
+        "is_waiting": session.is_waiting
+    }
+
+@mcp.tool
+def get_variables(
+    session_id: str,
+    scope: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Get current variables in the debugging session.
+    
+    Args:
+        session_id: The active session ID
+        scope: Optional scope filter ('locals', 'globals')
+    
+    Returns:
+        Current variables and their values
+    """
+    with sessions_lock:
+        session = active_sessions.get(session_id)
+    
+    if not session:
+        return {"success": False, "error": f"Session {session_id} not found"}
+    
+    variables = session.variables or {}
+    
+    if scope:
+        variables = {k: v for k, v in variables.items() if k.lower() == scope.lower()}
+    
+    return {
+        "success": True,
+        "session_id": session_id,
+        "variables": variables,
+        "line": session.current_line,
+        "file": session.current_file
+    }
+
+@mcp.tool
+def get_variable_changes(
+    session_id: str
+) -> Dict[str, Any]:
+    """
+    Get variables that changed in the last step.
+    
+    Args:
+        session_id: The active session ID
+    
+    Returns:
+        Variables that changed and their new values
+    """
+    with sessions_lock:
+        session = active_sessions.get(session_id)
+    
+    if not session:
+        return {"success": False, "error": f"Session {session_id} not found"}
+    
+    return {
+        "success": True,
+        "session_id": session_id,
+        "changes": session.variables_delta or {},
+        "line": session.current_line,
+        "file": session.current_file
+    }
+
+@mcp.tool
+def explore_variable(
+    session_id: str,
+    variable_name: str,
+    path: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """
+    Explore a specific variable in detail (nested structures).
+    
+    Args:
+        session_id: The active session ID
+        variable_name: Name of the variable to explore
+        path: Optional path into nested structure (e.g., ['key1', 'subkey'])
+    
+    Returns:
+        Detailed information about the variable
+    """
+    with sessions_lock:
+        session = active_sessions.get(session_id)
+    
+    if not session:
+        return {"success": False, "error": f"Session {session_id} not found"}
+    
+    # Get the variable
+    variables = session.variables or {}
+    
+    # Find the variable in any scope
+    var_value = None
+    for scope_name, scope_vars in variables.items():
+        if isinstance(scope_vars, dict) and variable_name in scope_vars:
+            var_value = scope_vars[variable_name]
+            break
+    
+    if var_value is None:
+        return {
+            "success": False,
+            "error": f"Variable '{variable_name}' not found"
+        }
+    
+    # Navigate path if provided
+    if path:
+        try:
+            for key in path:
+                if isinstance(var_value, dict):
+                    var_value = var_value[key]
+                elif isinstance(var_value, (list, tuple)):
+                    var_value = var_value[int(key)]
+                else:
+                    return {
+                        "success": False,
+                        "error": f"Cannot navigate into {type(var_value).__name__}"
+                    }
+        except (KeyError, IndexError, ValueError) as e:
+            return {
+                "success": False,
+                "error": f"Path navigation failed: {e}"
+            }
+    
+    # Prepare response with type information
+    result = {
+        "success": True,
+        "session_id": session_id,
+        "variable_name": variable_name,
+        "path": path or [],
+        "type": type(var_value).__name__,
+        "value": var_value
+    }
+    
+    # Add collection-specific info
+    if isinstance(var_value, dict):
+        result["keys"] = list(var_value.keys())
+        result["size"] = len(var_value)
+    elif isinstance(var_value, (list, tuple)):
+        result["length"] = len(var_value)
+        result["preview"] = var_value[:10] if len(var_value) > 10 else var_value
+    elif isinstance(var_value, str):
+        result["length"] = len(var_value)
+        if len(var_value) > 100:
+            result["preview"] = var_value[:100] + "..."
+    
+    return result
+
+@mcp.tool
+def list_active_sessions() -> List[Dict[str, Any]]:
+    """
+    List all currently active debugging sessions.
+    
+    Returns:
+        List of active session information
+    """
+    with sessions_lock:
+        sessions = []
+        for sid, session in active_sessions.items():
+            sessions.append({
+                "session_id": sid,
+                "pid": session.process.pid if session.process else None,
+                "current_file": session.current_file,
+                "current_line": session.current_line,
+                "is_waiting": session.is_waiting,
+                "mode": session.mode
+            })
+    return sessions
+
+@mcp.tool
+def terminate_debug_session(
+    session_id: str
+) -> Dict[str, Any]:
+    """
+    Terminate an active debugging session.
+    
+    Args:
+        session_id: The session ID to terminate
+    
+    Returns:
+        Success status
+    """
+    with sessions_lock:
+        session = active_sessions.get(session_id)
+        
+        if not session:
+            return {"success": False, "error": f"Session {session_id} not found"}
+        
+        try:
+            # Terminate the process
+            if session.process:
+                session.process.terminate()
+                session.process.wait(timeout=5)
+            
+            # Remove from active sessions
+            del active_sessions[session_id]
+            
+            return {
+                "success": True,
+                "session_id": session_id,
+                "status": "terminated"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+@mcp.tool
+def get_current_state(
+    session_id: str
+) -> Dict[str, Any]:
+    """
+    Get the complete current state of a debugging session.
+    
+    Args:
+        session_id: The active session ID
+    
+    Returns:
+        Complete state including line, code, variables, and changes
+    """
+    with sessions_lock:
+        session = active_sessions.get(session_id)
+    
+    if not session:
+        return {"success": False, "error": f"Session {session_id} not found"}
+    
+    # Import here to get summarization functions
+    import sys
+    from pathlib import Path
+    autodebugger_path = Path(__file__).parent.parent / "autodebugger"
+    if str(autodebugger_path) not in sys.path:
+        sys.path.insert(0, str(autodebugger_path))
+    
+    from common import summarize_value, summarize_delta
+    
+    # Summarize variables
+    var_summary = {}
+    for scope, vars_dict in (session.variables or {}).items():
+        if isinstance(vars_dict, dict):
+            var_summary[scope] = {
+                name: summarize_value(value, 60)
+                for name, value in vars_dict.items()
+            }
+    
+    # Summarize changes
+    changes_summary = summarize_delta(session.variables_delta or {})
+    
+    return {
+        "success": True,
+        "session_id": session_id,
+        "current_file": session.current_file,
+        "current_line": session.current_line,
+        "current_code": session.current_code,
+        "is_waiting": session.is_waiting,
+        "variables_summary": var_summary,
+        "changes_summary": changes_summary,
+        "full_variables": session.variables,
+        "full_changes": session.variables_delta
     }
 
 if __name__ == "__main__":
