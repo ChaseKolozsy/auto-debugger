@@ -187,6 +187,9 @@ def syntax_to_speech_code(code: str) -> str:
                         brace_depth -= 1
                     else:
                         result += " close brace "
+                elif char == ',' and (paren_depth > 0 or bracket_depth > 0 or brace_depth > 0):
+                    # Announce comma when inside a collection
+                    result += " comma "
                 else:
                     result += char
             else:
@@ -289,6 +292,9 @@ def syntax_to_speech_value(value_str: str) -> str:
                     brace_depth -= 1
                 else:
                     result += " close brace "
+            elif char == ',' and (paren_depth > 0 or bracket_depth > 0 or brace_depth > 0):
+                # Announce comma when inside a collection
+                result += " comma "
             else:
                 result += char
         else:
