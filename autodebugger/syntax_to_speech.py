@@ -162,28 +162,28 @@ def syntax_to_speech_code(code: str) -> str:
             if not in_string:
                 if char == '(':
                     paren_depth += 1
-                    result += f" open paren level {paren_depth} "
+                    result += f" level {paren_depth} open paren "
                 elif char == ')':
                     if paren_depth > 0:
-                        result += f" close paren level {paren_depth} "
+                        result += f" level {paren_depth} close paren "
                         paren_depth -= 1
                     else:
                         result += " close paren "
                 elif char == '[':
                     bracket_depth += 1
-                    result += f" open bracket level {bracket_depth} "
+                    result += f" level {bracket_depth} open bracket "
                 elif char == ']':
                     if bracket_depth > 0:
-                        result += f" close bracket level {bracket_depth} "
+                        result += f" level {bracket_depth} close bracket "
                         bracket_depth -= 1
                     else:
                         result += " close bracket "
                 elif char == '{':
                     brace_depth += 1
-                    result += f" open brace level {brace_depth} "
+                    result += f" level {brace_depth} open brace "
                 elif char == '}':
                     if brace_depth > 0:
-                        result += f" close brace level {brace_depth} "
+                        result += f" level {brace_depth} close brace "
                         brace_depth -= 1
                     else:
                         result += " close brace "
@@ -256,36 +256,36 @@ def syntax_to_speech_value(value_str: str) -> str:
             if char == '(':
                 paren_depth += 1
                 if is_tuple and paren_depth == 1:
-                    result += f" tuple open paren level {paren_depth} "
+                    result += f" level {paren_depth} tuple open paren "
                 else:
-                    result += f" open paren level {paren_depth} "
+                    result += f" level {paren_depth} open paren "
             elif char == ')':
                 if paren_depth > 0:
-                    result += f" close paren level {paren_depth} "
+                    result += f" level {paren_depth} close paren "
                     paren_depth -= 1
                 else:
                     result += " close paren "
             elif char == '[':
                 bracket_depth += 1
                 if is_list and bracket_depth == 1:
-                    result += f" list open bracket level {bracket_depth} "
+                    result += f" level {bracket_depth} list open bracket "
                 else:
-                    result += f" open bracket level {bracket_depth} "
+                    result += f" level {bracket_depth} open bracket "
             elif char == ']':
                 if bracket_depth > 0:
-                    result += f" close bracket level {bracket_depth} "
+                    result += f" level {bracket_depth} close bracket "
                     bracket_depth -= 1
                 else:
                     result += " close bracket "
             elif char == '{':
                 brace_depth += 1
                 if is_dict and brace_depth == 1:
-                    result += f" dictionary open brace level {brace_depth} "
+                    result += f" level {brace_depth} dictionary open brace "
                 else:
-                    result += f" open brace level {brace_depth} "
+                    result += f" level {brace_depth} open brace "
             elif char == '}':
                 if brace_depth > 0:
-                    result += f" close brace level {brace_depth} "
+                    result += f" level {brace_depth} close brace "
                     brace_depth -= 1
                 else:
                     result += " close brace "
