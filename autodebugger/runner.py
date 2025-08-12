@@ -1375,10 +1375,7 @@ class AutoDebugger:
                                                     if self._nested_explorer:
                                                         # Read the complete structure naturally
                                                         self._nested_explorer.read_complete_structure(var_name, value)
-                                                    # Just a brief prompt to indicate ready for next selection
-                                                    if self._tts:
-                                                        self._tts.speak("Select another or N to cancel", interrupt=True)
-                                                        # Don't wait - allow immediate next selection
+                                                    # Don't announce "Select another" - it interrupts the variable content
                                                 else:
                                                     if self._tts:
                                                         self._tts.speak(f"Invalid selection {selection}")
