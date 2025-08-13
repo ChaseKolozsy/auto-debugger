@@ -628,7 +628,11 @@ class StepControlHandler(BaseHTTPRequestHandler):
                     const total = Number(state.explore_total || 0);
                     const page = Number(state.explore_page || 0);
                     const hasNext = (page + 1) * 10 < total;
-                    html += '<div class="hint">Press 0-9 to explore, ' + (hasNext ? 'P next page, ' : '') + 'N cancel</div>';
+                    const hasPrev = page > 0;
+                    html += '<div class="hint">Press 0-9 to explore' + 
+                            (hasNext ? ', N next page' : '') + 
+                            (hasPrev ? ', P previous' : '') + 
+                            ', Q to quit</div>';
                     container.innerHTML = html;
                     // Click to select
                     container.querySelectorAll('.variable-item').forEach((node, idx) => {
@@ -660,7 +664,11 @@ class StepControlHandler(BaseHTTPRequestHandler):
                     const total = Number(state.explore_total || 0);
                     const page = Number(state.explore_page || 0);
                     const hasNext = (page + 1) * 10 < total;
-                    html += '<div class="hint">Press 0-9 to explore, ' + (hasNext ? 'P next page, ' : '') + 'N cancel</div>';
+                    const hasPrev = page > 0;
+                    html += '<div class="hint">Press 0-9 to explore' + 
+                            (hasNext ? ', N next page' : '') + 
+                            (hasPrev ? ', P previous' : '') + 
+                            ', Q to quit</div>';
                     container.innerHTML = html;
                     // Click to select
                     container.querySelectorAll('.variable-item').forEach((node, idx) => {
@@ -778,22 +786,13 @@ class StepControlHandler(BaseHTTPRequestHandler):
             } else if (e.key >= '0' && e.key <= '9') {
                 // Selection in explore mode
                 sendAction(e.key);
-            } else if (e.key === 'p' || e.key === 'P') {
-                // Next page in explore mode
-                sendAction('p');
             } else if (e.key === 'n' || e.key === 'N') {
-                // Cancel explore or answer 'yes' depending on prompt
-                sendAction('n');
-            } else if (e.key === 'i' || e.key === 'I') {
-                // Step in (maps to yes)
-                sendAction('y');
-            } else if (e.key === 'o' || e.key === 'O') {
-                // Step out (maps to no)
-                sendAction('n');
-            } else if (e.key === 'b' || e.key === 'B') {
-                // Back (treat as cancel/no)
+                // Send 'n' - backend will interpret based on context
+                // (next page in exploration, or other uses)
                 sendAction('n');
             }
+            // Note: p is handled above for 'parts'
+            // q is handled above for 'quit'
         });
         
         // Poll for state updates
