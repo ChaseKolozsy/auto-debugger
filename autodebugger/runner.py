@@ -41,6 +41,70 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def find_nearest_executable_line(file_path: str, target_line: int) -> int:
+    """Find the nearest executable line to the target line number.
+    
+    Returns the target line if it's executable, or the next executable line after it.
+    Returns 0 if no executable line found.
+    """
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        
+        # Check if target line is executable
+        if 1 <= target_line <= len(lines):
+            text = lines[target_line - 1]
+            stripped = text.strip()
+            
+            # Check if it's likely executable
+            if stripped and not stripped.startswith('#') and '"""' not in stripped and "'''" not in stripped:
+                if any(kw in text for kw in ['=', 'if ', 'for ', 'while ', 'def ', 'class ', 'return', 'print', 'import']):
+                    return target_line
+                elif not text.startswith(' ') and not text.startswith('\t'):
+                    return target_line
+        
+        # Search forward for next executable line
+        for idx in range(target_line, len(lines) + 1):
+            if idx > len(lines):
+                break
+            text = lines[idx - 1]
+            stripped = text.strip()
+            
+            # Skip empty lines and comments
+            if not stripped or stripped.startswith('#'):
+                continue
+            # Skip docstrings and multiline strings
+            if '"""' in stripped or "'''" in stripped:
+                continue
+            # Check if likely executable
+            if any(kw in text for kw in ['=', 'if ', 'for ', 'while ', 'def ', 'class ', 'return', 'print', 'import']):
+                return idx
+            elif not text.startswith(' ') and not text.startswith('\t'):
+                return idx
+        
+        # Search backward if nothing found forward
+        for idx in range(target_line - 1, 0, -1):
+            text = lines[idx - 1]
+            stripped = text.strip()
+            
+            # Skip empty lines and comments
+            if not stripped or stripped.startswith('#'):
+                continue
+            # Skip docstrings and multiline strings
+            if '"""' in stripped or "'''" in stripped:
+                continue
+            # Check if likely executable
+            if any(kw in text for kw in ['=', 'if ', 'for ', 'while ', 'def ', 'class ', 'return', 'print', 'import']):
+                return idx
+            elif not text.startswith(' ') and not text.startswith('\t'):
+                return idx
+                
+    except Exception:
+        pass
+    
+    return 0
+
+
 class AutoDebugger:
     def __init__(self, python_exe: Optional[str] = None, db_path: Optional[str] = None) -> None:
         self.python_exe = python_exe or sys.executable
@@ -54,6 +118,9 @@ class AutoDebugger:
         self._tts: Optional[MacSayTTS] = None
         self._nested_explorer: Optional[NestedValueExplorer] = None
         self._abort_requested: bool = False
+        self._goto_target_line: Optional[int] = None  # Target line for goto mode
+        self._goto_mode_active: bool = False  # Whether we're fast-forwarding to a line
+        self._audio_state_before_goto: bool = False  # To restore audio state after goto
 
     def _find_free_port(self) -> int:
         with socket.socket() as s:
@@ -719,6 +786,27 @@ class AutoDebugger:
                         file_path = frame.get("source", {}).get("path") or ""
                         line = int(frame.get("line") or 0)
 
+                        # Check if we've reached the goto target
+                        if self._goto_mode_active and self._goto_target_line:
+                            if line >= self._goto_target_line:
+                                # We've reached or passed the target line
+                                print(f"\n[goto] Reached line {line} (target was {self._goto_target_line})\n", flush=True)
+                                
+                                # Restore audio state
+                                if self._controller and hasattr(self._controller, 'set_audio_state'):
+                                    self._controller.set_audio_state(enabled=self._audio_state_before_goto, available=True)
+                                
+                                # Clear goto mode
+                                self._goto_mode_active = False
+                                self._goto_target_line = None
+                                
+                                # Continue normally from here
+                            elif manual_mode_active:
+                                # Still in goto mode and haven't reached target
+                                # Skip all the manual prompting and just step
+                                client.request("stepIn", {"threadId": thread_id})
+                                continue  # Skip the rest of the loop
+
                         # Snapshot the file content the first time we encounter it in this session
                         # This ensures the UI can fetch function details from the exact source that ran,
                         # even when the working tree is dirty or the file changes after execution.
@@ -853,8 +941,8 @@ class AutoDebugger:
                         )
                         
                         # Handle manual stepping
-                        if manual_mode_active:
-                            # Update controller state
+                        if manual_mode_active and not self._goto_mode_active:
+                            # Update controller state (skip if in goto mode)
                             if self._controller:
                                 # Convert to display format for web view
                                 display_vars = self._extract_display_values(vars_payload)
@@ -990,7 +1078,43 @@ class AutoDebugger:
                                 # Clear the just_activated_manual flag since we've now received user input
                                 just_activated_manual = False
                                 
-                                if action == 'stop_audio':
+                                if action and action.startswith('goto:'):
+                                    # Handle goto line command
+                                    try:
+                                        target_line = int(action.split(':')[1])
+                                        # Find nearest executable line from target
+                                        actual_target = find_nearest_executable_line(file_path, target_line)
+                                        
+                                        if actual_target > 0:
+                                            # Save current audio state and mute
+                                            if self._controller and hasattr(self._controller, 'is_audio_enabled'):
+                                                self._audio_state_before_goto = self._controller.is_audio_enabled()
+                                                # Temporarily disable audio for fast-forward
+                                                if self._controller and hasattr(self._controller, 'set_audio_state'):
+                                                    self._controller.set_audio_state(enabled=False, available=True)
+                                            
+                                            # Stop any current audio
+                                            if self._tts:
+                                                self._tts.stop()
+                                            
+                                            # Set goto mode
+                                            self._goto_target_line = actual_target
+                                            self._goto_mode_active = True
+                                            
+                                            print(f"\n[goto] Fast-forwarding to line {actual_target} (target: {target_line})...\n", flush=True)
+                                            
+                                            # Start stepping immediately
+                                            should_step_after = True
+                                            break
+                                        else:
+                                            print(f"\n[goto] No executable line found near {target_line}\n", flush=True)
+                                            should_step_after = False
+                                            continue
+                                    except (ValueError, IndexError):
+                                        print("\n[goto] Invalid line number\n", flush=True)
+                                        should_step_after = False
+                                        continue
+                                elif action == 'stop_audio':
                                     # Stop any playing audio
                                     if self._tts:
                                         self._tts.stop()

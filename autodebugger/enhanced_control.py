@@ -551,6 +551,7 @@ class StepControlHandler(BaseHTTPRequestHandler):
                     <li><b>x</b> - Toggle function context display</li>
                     <li><b>m</b> - Toggle audio mute/unmute</li>
                     <li><b>s</b> - Cycle speech speed (slow/medium/fast)</li>
+                    <li><b>l</b> - Go to line number</li>
                 </ul>
             </div>
         </div>
@@ -931,6 +932,13 @@ class StepControlHandler(BaseHTTPRequestHandler):
                 toggleAudio();
             } else if (e.key === 's' || e.key === 'S') {
                 sendAction('speed');  // Cycle speed
+            } else if (e.key === 'l' || e.key === 'L') {
+                e.preventDefault();
+                // Prompt for line number
+                const lineNum = prompt('Enter line number to go to:');
+                if (lineNum && !isNaN(parseInt(lineNum))) {
+                    sendAction('goto:' + lineNum);
+                }
             } else if (e.key >= '0' && e.key <= '9') {
                 // Selection in explore mode
                 sendAction(e.key);
