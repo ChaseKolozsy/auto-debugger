@@ -872,9 +872,8 @@ class StepControlHandler(BaseHTTPRequestHandler):
             if (currentState.blocks_active) {
                 if (e.key === 'Escape') {
                     e.preventDefault();
-                    // Send explicit stop first to cut current speech, then close
+                    // Only stop audio; do not exit exploration
                     sendAction('stop_audio');
-                    sendAction('q');
                     return;
                 }
                 if (e.key >= '0' && e.key <= '9') {
