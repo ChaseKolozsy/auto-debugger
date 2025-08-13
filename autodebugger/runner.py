@@ -634,16 +634,28 @@ class AutoDebugger:
             if os.environ.get("PYTHONPATH"):
                 pythonpath_parts.append(os.environ.get("PYTHONPATH"))
             
-            # For scripts in tests/package_name/script.py structure
-            # We need to add the tests directory to PYTHONPATH
-            if os.path.basename(parent_dir) == "tests":
-                # parent_dir is already tests/, so add it
-                pythonpath_parts.append(parent_dir)
-            elif "tests" in script_dir and os.path.exists(os.path.join(script_dir, "__init__.py")):
-                # script_dir is something like tests/calculator, add tests/
-                tests_dir = os.path.dirname(script_dir)
-                if os.path.basename(tests_dir) == "tests":
-                    pythonpath_parts.append(tests_dir)
+            # For scripts inside package structures (directories with __init__.py)
+            # We need to find the root package directory and add its parent to PYTHONPATH
+            if os.path.exists(os.path.join(script_dir, "__init__.py")):
+                # The script is in a package directory
+                # Walk up to find the topmost package directory
+                current_dir = script_dir
+                package_root = script_dir
+                
+                while True:
+                    parent = os.path.dirname(current_dir)
+                    if os.path.exists(os.path.join(parent, "__init__.py")):
+                        # Parent is also a package, keep going up
+                        package_root = parent
+                        current_dir = parent
+                    else:
+                        # Parent is not a package, we found the root
+                        break
+                
+                # Add the parent of the package root to PYTHONPATH
+                package_parent = os.path.dirname(package_root)
+                if package_parent and package_parent not in pythonpath_parts:
+                    pythonpath_parts.append(package_parent)
             
             # Always add parent directory as fallback
             if parent_dir not in pythonpath_parts:
@@ -660,10 +672,23 @@ class AutoDebugger:
             # Don't stop on entry if using --manual-from (we want to run to breakpoint)
             effective_stop_on_entry = stop_on_entry and not manual_from
             
-            # ALWAYS set cwd to tests directory if the script is under tests/
-            # This is critical for package imports to work correctly
-            if os.path.basename(parent_dir) == "tests":
-                working_dir = parent_dir  # Use tests/ as working directory
+            # Set working directory based on package structure
+            # If script is in a package, use the package parent as working directory
+            if os.path.exists(os.path.join(script_dir, "__init__.py")):
+                # Find the root package directory (same logic as above)
+                current_dir = script_dir
+                package_root = script_dir
+                
+                while True:
+                    parent = os.path.dirname(current_dir)
+                    if os.path.exists(os.path.join(parent, "__init__.py")):
+                        package_root = parent
+                        current_dir = parent
+                    else:
+                        break
+                
+                # Use parent of package root as working directory
+                working_dir = os.path.dirname(package_root) or os.getcwd()
             else:
                 working_dir = os.path.dirname(script_abs) or os.getcwd()
             

@@ -18,4 +18,5 @@ python -m autodebugger run \
     --manual-web \
     --manual-audio \
     --stop \
+    --manual-from tests/calculator/main.py:20 \
     tests/calculator/main.py
