@@ -171,7 +171,5 @@ class FunctionBlockExplorer:
             is_code: Whether to treat as code for syntax conversion
         """
         if self.tts:
+            # Fire-and-forget; allow outer loop to handle interrupts immediately
             self.tts.speak(block, interrupt=True, is_code=is_code)
-            import time
-            while self.tts.is_speaking():
-                time.sleep(0.05)

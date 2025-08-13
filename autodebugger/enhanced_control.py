@@ -872,27 +872,34 @@ class StepControlHandler(BaseHTTPRequestHandler):
             if (currentState.blocks_active) {
                 if (e.key === 'Escape') {
                     e.preventDefault();
+                    // Send explicit stop first to cut current speech, then close
+                    sendAction('stop_audio');
                     sendAction('q');
                     return;
                 }
                 if (e.key >= '0' && e.key <= '9') {
                     e.preventDefault();
+                    // Stop current audio before switching selection
+                    sendAction('stop_audio');
                     sendAction(e.key);
                     return;
                 }
                 if (e.key === 'n' || e.key === 'N') {
                     e.preventDefault();
+                    sendAction('stop_audio');
                     sendAction('n');
                     return;
                 }
                 if (e.key === 'p' || e.key === 'P') {
                     e.preventDefault();
                     // In popup, 'p' means previous page
+                    sendAction('stop_audio');
                     sendAction('p');
                     return;
                 }
                 if (e.key === 'q' || e.key === 'Q') {
                     e.preventDefault();
+                    sendAction('stop_audio');
                     sendAction('q');
                     return;
                 }
