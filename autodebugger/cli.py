@@ -105,7 +105,7 @@ def ui_cmd(db_path: Optional[str], host: str, port: int, open_browser: bool, use
         app = create_unified_app(db_path)
     else:
         app = create_legacy_app(db_path)
-    
+
     if open_browser:
         import webbrowser
         webbrowser.open(f"http://{host}:{port}/")
@@ -116,7 +116,7 @@ def ui_cmd(db_path: Optional[str], host: str, port: int, open_browser: bool, use
 @click.option("--db", "db_path", type=click.Path(), default=None, help="SQLite DB path for reports.")
 @click.option("--voice", default=None, show_default=True, help="macOS voice name for 'say' (default system voice)")
 @click.option("--rate", default=210, show_default=True, type=int, help="Speech rate (words per minute)")
-@click.option("--delay", default=0.01, show_default=True, type=float, help="Delay between lines during autoplay (seconds)")
+@click.option("--delay", default=0, show_default=True, type=float, help="Delay between lines during autoplay (seconds)")
 @click.option("--verbose", is_flag=True, default=False, help="Print spoken text and selection info to console")
 @click.option("--mode", type=click.Choice(["auto", "manual"], case_sensitive=False), default="manual", show_default=True, help="Playback mode")
 @click.option("--recite-func", type=click.Choice(["off", "sig", "full"], case_sensitive=False), default="off", show_default=True, help="Recite function signature/body for each line")
