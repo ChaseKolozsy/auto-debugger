@@ -613,30 +613,66 @@ class AutoDebugger:
             script_dir = os.path.dirname(script_abs)
             parent_dir = os.path.dirname(script_dir)
             module_name: Optional[str] = None
-            if os.path.exists(os.path.join(script_dir, "__init__.py")):
-                # Derive module path relative to parent on sys.path
-                pkg = os.path.basename(script_dir)
-                base = os.path.basename(parent_dir)
-                # If parent is tests (e.g., tests/calculator), import as calculator.main
-                if base == "tests":
-                    module_name = f"{pkg}.main"
-                else:
-                    module_name = f"{pkg}.main"
+            
+            # Disable module mode - always use program mode to avoid hangs
+            # Module mode seems to cause issues with debugpy initialization
+            # if os.path.exists(os.path.join(script_dir, "__init__.py")):
+            #     # This is a package, run as module
+            #     pkg = os.path.basename(script_dir)
+            #     script_name = os.path.splitext(os.path.basename(script_abs))[0]
+            #     if os.path.basename(parent_dir) == "tests":
+            #         # For tests/calculator/main.py, run as calculator.main
+            #         module_name = f"{pkg}.{script_name}"
+            #     else:
+            #         module_name = f"{pkg}.{script_name}"
 
-            env_vars = {
-                "PYTHONPATH": os.pathsep.join(filter(None, [os.environ.get("PYTHONPATH"), parent_dir]))
-            }
+            # For tests with package imports, we need the parent directory in PYTHONPATH
+            # This allows "from calculator import Calculator" to work properly
+            pythonpath_parts = []
+            
+            # Keep any existing PYTHONPATH
+            if os.environ.get("PYTHONPATH"):
+                pythonpath_parts.append(os.environ.get("PYTHONPATH"))
+            
+            # For scripts in tests/package_name/script.py structure
+            # We need to add the tests directory to PYTHONPATH
+            if os.path.basename(parent_dir) == "tests":
+                # parent_dir is already tests/, so add it
+                pythonpath_parts.append(parent_dir)
+            elif "tests" in script_dir and os.path.exists(os.path.join(script_dir, "__init__.py")):
+                # script_dir is something like tests/calculator, add tests/
+                tests_dir = os.path.dirname(script_dir)
+                if os.path.basename(tests_dir) == "tests":
+                    pythonpath_parts.append(tests_dir)
+            
+            # Always add parent directory as fallback
+            if parent_dir not in pythonpath_parts:
+                pythonpath_parts.append(parent_dir)
+            
+            # Build final PYTHONPATH
+            final_pythonpath = os.pathsep.join(filter(None, pythonpath_parts))
+            
+            # Copy current environment and update PYTHONPATH
+            env_vars = os.environ.copy()
+            env_vars["PYTHONPATH"] = final_pythonpath
 
             # Send launch but do not block waiting for response yet
             # Don't stop on entry if using --manual-from (we want to run to breakpoint)
             effective_stop_on_entry = stop_on_entry and not manual_from
+            
+            # ALWAYS set cwd to tests directory if the script is under tests/
+            # This is critical for package imports to work correctly
+            if os.path.basename(parent_dir) == "tests":
+                working_dir = parent_dir  # Use tests/ as working directory
+            else:
+                working_dir = os.path.dirname(script_abs) or os.getcwd()
             
             launch_args = {
                 "name": "Python: AutoDebug",
                 "type": "python",
                 "request": "launch",
                 "console": "internalConsole",
-                "cwd": parent_dir or os.getcwd(),
+                "cwd": working_dir,
                 "justMyCode": just_my_code,
                 "stopOnEntry": effective_stop_on_entry,
                 "showReturnValue": True,
@@ -782,7 +818,11 @@ class AutoDebugger:
                 events = client.pop_events()
                 # If nothing arrived, small sleep to avoid spin
                 if not events:
-                    time.sleep(0.01)
+                    # Use shorter delay in skip modes for speed
+                    if self._goto_mode_active or self._skip_to_next_file_mode:
+                        time.sleep(0.001)  # 1ms in skip modes
+                    else:
+                        time.sleep(0.01)  # 10ms normally
                     continue
                 for ev in events:
                     if ev.event == "initialized":
