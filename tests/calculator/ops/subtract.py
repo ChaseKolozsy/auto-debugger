@@ -1,3 +1,3 @@
 class Subtract:
-    def apply(self, a: float, b: float) -> float:
+    def compute(self, a: float, b: float) -> float:
         return a - b
