@@ -29,7 +29,7 @@ else:
     print("[DEBUG] Using control.py (USE_ENHANCED=False)", file=sys.stderr)
     from .control import HttpStepController, prompt_for_action
 from .common import extract_function_context, summarize_value, summarize_delta
-from .function_blocks import FunctionBlockExplorer
+from .function_blocks import FunctionBlockExplorer, get_block_preview
 from .dap_client import DapClient
 from .db import LineReport, LineReportStore, SessionSummary
 from .audio_ui import MacSayTTS
@@ -1145,9 +1145,34 @@ class AutoDebugger:
                                             if self._controller:
                                                 self._controller.clear_actions()
                                             
+                                    # Helper: update web popup with current page blocks
+                                    def _update_blocks_popup() -> None:
+                                        if not self._controller:
+                                            return
+                                        try:
+                                            page_blocks = explorer.get_current_page_blocks()
+                                            items_payload = []
+                                            for idx, block in page_blocks:
+                                                preview = get_block_preview(block)
+                                                items_payload.append({
+                                                    "index": idx,
+                                                    "title": preview,
+                                                    "code": block,
+                                                })
+                                            self._controller.update_state(
+                                                blocks_active=True,
+                                                blocks_items=items_payload,
+                                                blocks_page=explorer.current_page,
+                                                blocks_total=len(explorer.blocks),
+                                            )
+                                        except Exception:
+                                            pass
+
                                             # Announce page info
                                             self._tts.speak(explorer.announce_page_info())
                                             self._wait_for_speech_with_interrupt()
+                                    # Initial render of popup
+                                    _update_blocks_popup()
                                             
                                             # Enter block selection loop
                                             exploring_blocks = True
@@ -1181,6 +1206,8 @@ class AutoDebugger:
                                                         if self._tts:
                                                             self._tts.stop()
                                                         explorer.speak_block(block)
+                                                    # Keep popup open for further selections
+                                                    _update_blocks_popup()
                                                     else:
                                                         if self._tts:
                                                             self._tts.stop()
@@ -1194,6 +1221,7 @@ class AutoDebugger:
                                                     if explorer.next_page():
                                                         self._tts.speak(explorer.announce_page_info())
                                                         self._wait_for_speech_with_interrupt()
+                                                    _update_blocks_popup()
                                                     else:
                                                         self._tts.speak("Already at last page")
                                                         self._wait_for_speech_with_interrupt()
@@ -1205,6 +1233,7 @@ class AutoDebugger:
                                                     if explorer.previous_page():
                                                         self._tts.speak(explorer.announce_page_info())
                                                         self._wait_for_speech_with_interrupt()
+                                                    _update_blocks_popup()
                                                     else:
                                                         self._tts.speak("Already at first page")
                                                         self._wait_for_speech_with_interrupt()
@@ -1228,6 +1257,13 @@ class AutoDebugger:
                                                     exploring_blocks = False
                                                     self._tts.speak("Exiting block exploration")
                                                     self._wait_for_speech_with_interrupt()
+                                                # Clear popup
+                                                if self._controller:
+                                                    self._controller.update_state(
+                                                        blocks_active=False,
+                                                        blocks_items=[],
+                                                        blocks_total=0,
+                                                    )
                                                 
                                                 elif block_action in ['h', 'help']:
                                                     # Help

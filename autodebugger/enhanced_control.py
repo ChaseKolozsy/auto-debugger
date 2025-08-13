@@ -53,6 +53,12 @@ class SharedState:
             "explore_page": 0,
             "explore_total": 0,
             "explore_mode": None  # 'changes' or 'variables' to indicate which section
+            ,
+            # Popup for function parts (blocks) exploration
+            "blocks_active": False,
+            "blocks_items": [],   # list of {index, title, code}
+            "blocks_page": 0,
+            "blocks_total": 0
         }
         self._function_cache = {}  # Cache function contexts by (file, line)
     
@@ -434,6 +440,53 @@ class StepControlHandler(BaseHTTPRequestHandler):
             font-style: italic;
             margin-top: 5px;
         }
+        /* Popup overlay for function parts */
+        .overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+        .modal {
+            background: #0f172a;
+            border: 1px solid #263041;
+            border-radius: 12px;
+            width: 92%;
+            max-width: 1000px;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .modal-header, .modal-footer {
+            padding: 12px 16px;
+            border-bottom: 1px solid #263041;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .modal-footer { border-top: 1px solid #263041; border-bottom: none; }
+        .modal-title { font-weight: 600; color: #e5e7eb; }
+        .modal-content {
+            padding: 16px;
+            overflow: auto;
+        }
+        .block-item { 
+            background: #1e293b; 
+            border: 1px solid #334155; 
+            border-radius: 8px; 
+            padding: 12px; 
+            margin: 10px 0; 
+            font-family: 'Monaco', 'Menlo', 'SF Mono', monospace; 
+            color: #e2e8f0; 
+            cursor: pointer; 
+        }
+        .block-item:hover { background: #263041; border-color: #60a5fa; }
+        .block-title { font-weight: 600; color: #60a5fa; margin-bottom: 6px; }
+        .block-code { background: #0b1220; border: 1px solid #263041; border-radius: 6px; padding: 10px; white-space: pre; overflow-x: auto; }
     </style>
 </head>
 <body>
@@ -518,6 +571,26 @@ class StepControlHandler(BaseHTTPRequestHandler):
                     <div style="color: #64748b; text-align: center; padding: 20px;">
                         No changes yet
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Function Parts Popup -->
+    <div id="blocksOverlay" class="overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">Function Parts</div>
+                <div id="blocksPageInfo" class="hint"></div>
+            </div>
+            <div id="blocksList" class="modal-content"></div>
+            <div class="modal-footer">
+                <div>
+                    <button onclick="sendAction('q')" class="danger">Close (Q)</button>
+                </div>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <button id="blocksPrevBtn" onclick="sendAction('p')">Prev (P)</button>
+                    <button id="blocksNextBtn" onclick="sendAction('n')">Next (N)</button>
                 </div>
             </div>
         </div>
@@ -696,6 +769,45 @@ class StepControlHandler(BaseHTTPRequestHandler):
             } else {
                 audioBtn.style.display = 'none';
             }
+
+            // Render function parts popup if active
+            const overlay = document.getElementById('blocksOverlay');
+            const listEl = document.getElementById('blocksList');
+            const pageInfoEl = document.getElementById('blocksPageInfo');
+            const prevBtn = document.getElementById('blocksPrevBtn');
+            const nextBtn = document.getElementById('blocksNextBtn');
+            if (state.blocks_active && Array.isArray(state.blocks_items) && state.blocks_items.length > 0) {
+                overlay.style.display = 'flex';
+                // Build list
+                let html = '';
+                for (const item of state.blocks_items) {
+                    const title = '[' + item.index + '] ' + (item.title || 'Block');
+                    const code = String(item.code || '');
+                    html += '<div class="block-item" data-index="' + item.index + '">';
+                    html += '<div class="block-title">' + title + '</div>';
+                    html += '<div class="block-code">' + code.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div>';
+                    html += '</div>';
+                }
+                listEl.innerHTML = html;
+                // Bind clicks
+                listEl.querySelectorAll('.block-item').forEach(node => {
+                    node.addEventListener('click', () => {
+                        const idx = node.getAttribute('data-index');
+                        if (idx !== null) sendAction(String(idx));
+                    });
+                });
+                // Page info and buttons
+                const page = Number(state.blocks_page || 0);
+                const total = Number(state.blocks_total || 0);
+                const totalPages = Math.max(1, Math.ceil(total / 10));
+                pageInfoEl.textContent = 'Page ' + (page + 1) + ' of ' + totalPages;
+                prevBtn.disabled = (page <= 0);
+                nextBtn.disabled = ((page + 1) * 10 >= total);
+            } else {
+                overlay.style.display = 'none';
+                listEl.innerHTML = '';
+                pageInfoEl.textContent = '';
+            }
         }
         
         function toggleFunction() {
@@ -756,6 +868,36 @@ class StepControlHandler(BaseHTTPRequestHandler):
         
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
+            // If blocks popup is active, override certain keys for exploration
+            if (currentState.blocks_active) {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    sendAction('q');
+                    return;
+                }
+                if (e.key >= '0' && e.key <= '9') {
+                    e.preventDefault();
+                    sendAction(e.key);
+                    return;
+                }
+                if (e.key === 'n' || e.key === 'N') {
+                    e.preventDefault();
+                    sendAction('n');
+                    return;
+                }
+                if (e.key === 'p' || e.key === 'P') {
+                    e.preventDefault();
+                    // In popup, 'p' means previous page
+                    sendAction('p');
+                    return;
+                }
+                if (e.key === 'q' || e.key === 'Q') {
+                    e.preventDefault();
+                    sendAction('q');
+                    return;
+                }
+                // Fall through for other keys during popup
+            }
             if (e.key === 'Escape') {
                 e.preventDefault();
                 sendAction('stop_audio');
