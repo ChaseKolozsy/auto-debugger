@@ -119,6 +119,7 @@ class AutoDebugger:
         self._nested_explorer: Optional[NestedValueExplorer] = None
         self._abort_requested: bool = False
         self._goto_target_line: Optional[int] = None  # Target line for goto mode
+        self._goto_target_file: Optional[str] = None  # Target file for goto mode
         self._goto_mode_active: bool = False  # Whether we're fast-forwarding to a line
         self._audio_state_before_goto: bool = False  # To restore audio state after goto
 
@@ -787,10 +788,10 @@ class AutoDebugger:
                         line = int(frame.get("line") or 0)
 
                         # Check if we've reached the goto target
-                        if self._goto_mode_active and self._goto_target_line:
-                            if line >= self._goto_target_line:
-                                # We've reached or passed the target line
-                                print(f"\n[goto] Reached line {line} (target was {self._goto_target_line})\n", flush=True)
+                        if self._goto_mode_active and self._goto_target_line and self._goto_target_file:
+                            if file_path == self._goto_target_file and line == self._goto_target_line:
+                                # We've reached the exact target line in the correct file
+                                print(f"\n[goto] Reached line {line} in {os.path.basename(file_path)}\n", flush=True)
                                 
                                 # Restore audio state
                                 if self._controller and hasattr(self._controller, 'set_audio_state'):
@@ -799,9 +800,10 @@ class AutoDebugger:
                                 # Clear goto mode
                                 self._goto_mode_active = False
                                 self._goto_target_line = None
+                                self._goto_target_file = None
                                 
                                 # Continue normally from here
-                            # Don't skip anything here - let it record the line!
+                            # Keep stepping until we hit the target line
 
                         # Snapshot the file content the first time we encounter it in this session
                         # This ensures the UI can fetch function details from the exact source that ran,
@@ -1109,6 +1111,7 @@ class AutoDebugger:
                                             
                                             # Set goto mode
                                             self._goto_target_line = actual_target
+                                            self._goto_target_file = file_path  # Save current file
                                             self._goto_mode_active = True
                                             
                                             print(f"\n[goto] Fast-forwarding to line {actual_target} (target: {target_line})...\n", flush=True)
