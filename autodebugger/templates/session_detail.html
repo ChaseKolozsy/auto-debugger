@@ -182,7 +182,7 @@
     <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 12px; padding: 24px; max-width: 80%; max-height: 80%; overflow: auto; box-shadow: 0 20px 40px rgba(0,0,0,0.2);">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
         <h3 id="function-title" style="margin: 0;">Function Code</h3>
-        <button onclick="closeFunctionModal()" style="background: #ef4444; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">✕ Close (Q)</button>
+        <button onclick="closeFunctionModal()" style="background: #ef4444; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">✕ Close (Q/X)</button>
       </div>
       <div style="margin-bottom: 12px;">
         <button onclick="speakFunction(false)" style="padding: 6px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 8px;">🔊 Speak Signature (F)</button>
@@ -879,7 +879,10 @@
         if (!lineId) return;
         
         if (isPlaying) {
-          await stopAudio();
+          // Just pause, don't stop - preserve play state
+          isPlaying = false;
+          playPauseBtn.textContent = '▶ Play Session';
+          await fetch('/api/tts/stop', {method: 'POST'});
         } else {
           isPlaying = true;
           playPauseBtn.textContent = '⏸ Pause';
@@ -905,8 +908,31 @@
         const data = await response.json();
         
         document.getElementById('function-title').textContent = data.name || 'Function Code';
-        document.getElementById('function-code').textContent = data.body || data.sig || 'No function context available';
+        
+        // Display both signature and body if available
+        let content = '';
+        if (data.sig) {
+          content = data.sig;
+          if (data.body) {
+            content += '\n' + data.body;
+          }
+        } else if (data.body) {
+          content = data.body;
+        } else {
+          content = 'No function context available';
+        }
+        
+        document.getElementById('function-code').textContent = content;
         document.getElementById('function-modal').style.display = 'block';
+      }
+      
+      async function toggleFunctionCode() {
+        const modal = document.getElementById('function-modal');
+        if (modal.style.display === 'block') {
+          closeFunctionModal();
+        } else {
+          await showFunctionCode();
+        }
       }
       
       async function speakFunction(full = false) {
@@ -1763,12 +1789,26 @@
         } else if (e.key === 'Enter' && !modalOpen) {
           e.preventDefault();
           const idx = rows.indexOf(selected);
+          let newRow = null;
           if (e.shiftKey) {
             // Shift+Enter goes backwards
-            if (idx > 0) selectRow(rows[idx - 1]);
+            if (idx > 0) {
+              newRow = rows[idx - 1];
+              selectRow(newRow);
+            }
           } else {
             // Enter moves to next row only when no modal is open
-            if (idx < rows.length - 1) selectRow(rows[idx + 1]);
+            if (idx < rows.length - 1) {
+              newRow = rows[idx + 1];
+              selectRow(newRow);
+            }
+          }
+          // If play mode is active and we moved to a new row, automatically play the audio
+          if (isPlaying && newRow) {
+            const lineId = newRow.dataset.id;
+            if (lineId) {
+              await speakLine(lineId);
+            }
           }
         }
         
@@ -1785,10 +1825,10 @@
           closeBlockModal();
         }
         
-        // Function exploration
+        // Function exploration - toggle on 'x'
         else if (e.key.toLowerCase() === 'x') {
           e.preventDefault();
-          showFunctionCode();
+          toggleFunctionCode();
         } else if (e.key.toLowerCase() === 'f') {
           e.preventDefault();
           speakFunction(false);
