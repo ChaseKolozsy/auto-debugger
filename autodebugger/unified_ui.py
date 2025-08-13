@@ -250,18 +250,58 @@ class UnifiedReviewInterface:
             yield rec
     
     def get_function_context(self, file_path: str, line: int, session_id: str) -> Dict[str, Any]:
-        """Get function context for a line, using snapshots if available."""
-        # Try to get source from snapshot first
+        """Get function context for a line, using snapshots or git history if available."""
         source = None
+        
         try:
             self.store.open()
-            source = self.store.get_file_snapshot(session_id, file_path)
+            conn = self.store.conn
+            
+            # Get git provenance for the session
+            cur = conn.cursor()
+            cur.execute("SELECT git_root, git_commit, git_dirty FROM session_summaries WHERE session_id=?", 
+                       (session_id,))
+            row = cur.fetchone()
+            repo_root = row[0] if row else None
+            repo_commit = row[1] if row else None
+            repo_dirty = int(row[2]) if row and row[2] is not None else 0
+            
+            # When dirty, prefer DB snapshot
+            if repo_dirty != 0:
+                source = self.store.get_file_snapshot(session_id, file_path)
+            
+            # When clean, try to get from git commit
+            elif repo_root and repo_commit and os.path.abspath(file_path).startswith(os.path.abspath(repo_root)):
+                source = self._get_committed_source(file_path, repo_root, repo_commit)
+            
+            # If no snapshot/git, try current snapshot as fallback
+            if source is None:
+                source = self.store.get_file_snapshot(session_id, file_path)
+            
             self.store.close()
         except:
             pass
         
-        # Use common extraction
+        # Use common extraction with source (from snapshot/git) or fallback to current file
         return extract_function_context(file_path, line, source)
+    
+    def _get_committed_source(self, file_path: str, repo_root: str, commit: str) -> Optional[str]:
+        """Get source code from a specific git commit."""
+        try:
+            import subprocess
+            rel_path = os.path.relpath(file_path, repo_root)
+            result = subprocess.run(
+                ["git", "show", f"{commit}:{rel_path}"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                return result.stdout
+        except:
+            pass
+        return None
     
     def format_scope_brief(self, variables: Dict[str, Any], max_pairs: int = 10) -> str:
         """Format a brief summary of variables for speech."""
