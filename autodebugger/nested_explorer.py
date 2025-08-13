@@ -326,63 +326,54 @@ class NestedValueExplorer:
         """
         announcement = f"{name} equals {self._format_for_detailed_speech(value)}"
         # Use interrupt=True to stop any currently playing audio
-        self.tts.speak(announcement, interrupt=True)
+        self.tts.speak(announcement, interrupt=True, is_code=True)
         print(f"[TTS] {announcement}")
         # Don't wait - let the runner handle interruption checking
     
     def _format_for_detailed_speech(self, value: Any, depth: int = 0) -> str:
-        """Format a value for detailed speech reading with brackets/braces.
-        
-        Lists: [item1, item2, item3]
-        Dicts: {key1: value1, key2: value2}
-        This is for exploration mode where we want to read it like code.
+        """Format a value as code-like text so TTS can narrate levels.
+
+        Returns a punctuation-based representation ([], {}, (), colons, commas),
+        letting the TTS converter add level N bracket/paren/brace, dot, colon.
         """
         if depth > 10:  # Safety limit
-            return "deeply nested structure"
-            
+            return "..."
+
         if value is None:
             return "None"
-        elif isinstance(value, bool):
+        if isinstance(value, bool):
             return str(value)
-        elif isinstance(value, (int, float)):
+        if isinstance(value, (int, float)):
             return str(value)
-        elif isinstance(value, str):
-            # For strings, include quotes
-            if len(value) < 50:
+        if isinstance(value, str):
+            # Quote strings
+            if len(value) <= 50:
                 return f'"{value}"'
-            else:
-                return f"string of {len(value)} characters"
-        elif isinstance(value, list):
+            return f'"{value[:47]}..."'
+        if isinstance(value, list):
             if not value:
-                return "open bracket closed bracket"  # []
-            # Read with brackets
-            items = []
-            for item in value:
-                items.append(self._format_for_detailed_speech(item, depth + 1))
-            return f"open bracket {' comma '.join(items)} closed bracket"
-        elif isinstance(value, tuple):
+                return "[]"
+            items = [self._format_for_detailed_speech(item, depth + 1) for item in value]
+            return "[" + ", ".join(items) + "]"
+        if isinstance(value, tuple):
             if not value:
-                return "open paren closed paren"  # ()
-            items = []
-            for item in value:
-                items.append(self._format_for_detailed_speech(item, depth + 1))
-            return f"open paren {' comma '.join(items)} closed paren"
-        elif isinstance(value, dict):
+                return "()"
+            items = [self._format_for_detailed_speech(item, depth + 1) for item in value]
+            return "(" + ", ".join(items) + ")"
+        if isinstance(value, dict):
             if not value:
-                return "open brace closed brace"  # {}
-            # Skip private attributes for cleaner reading
+                return "{}"
             items = []
             for k, v in value.items():
-                if not (isinstance(k, str) and k.startswith('_')):
-                    key_str = f'"{k}"' if isinstance(k, str) else str(k)
-                    val_str = self._format_for_detailed_speech(v, depth + 1)
-                    items.append(f"{key_str} colon {val_str}")
-            if items:
-                return f"open brace {' comma '.join(items)} closed brace"
-            else:
-                return "dict with private attributes"
-        else:
-            return f"{type(value).__name__} object"
+                # Skip private attributes for cleaner reading
+                if isinstance(k, str) and k.startswith('_'):
+                    continue
+                key_str = f'"{k}"' if isinstance(k, str) else str(k)
+                val_str = self._format_for_detailed_speech(v, depth + 1)
+                items.append(f"{key_str}: {val_str}")
+            return "{" + ", ".join(items) + "}" if items else "{}"
+        # Fallback
+        return str(value)
     
     def _format_for_speech(self, value: Any, depth: int = 0) -> str:
         """Format a value for natural speech reading.

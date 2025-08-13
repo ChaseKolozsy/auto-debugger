@@ -1405,10 +1405,10 @@ class AutoDebugger:
                                                             # Put it back and break out of announcements
                                                             self._controller.shared_state.send_action(action)
                                                             break
-                                                    # Extract the actual value for announcement if it's a DAP structure
+                                                    # Extract value and speak with code-style narration for punctuation
                                                     actual_value = value["_parsed"] if isinstance(value, dict) and "_parsed" in value else value
                                                     brief_value = format_nested_value_summary(actual_value)
-                                                    self._tts.speak(f"{i}: {var_name} — {brief_value}", interrupt=True)
+                                                    self._tts.speak(f"{i}: {var_name} — {brief_value}", interrupt=True, is_code=True)
                                                 if end_idx < len(active_vars):
                                                     if page > 0:
                                                         self._tts.speak("Press 0 to 9 to explore, N for next page, P for previous, Q to quit", interrupt=True)
@@ -1613,7 +1613,7 @@ class AutoDebugger:
                                                             break
                                                     # Value is already parsed/fetched - use directly
                                                     brief_value = format_nested_value_summary(value)
-                                                    self._tts.speak(f"{i}: {var_name} — {brief_value}", interrupt=True)
+                                                    self._tts.speak(f"{i}: {var_name} — {brief_value}", interrupt=True, is_code=True)
                                                 if end_idx < len(active_vars):
                                                     if page > 0:
                                                         self._tts.speak("Press 0 to 9 to explore, N for next page, P for previous, Q to quit", interrupt=True)
