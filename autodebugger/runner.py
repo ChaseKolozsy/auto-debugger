@@ -1270,14 +1270,71 @@ class AutoDebugger:
                                                 changed_vars.append((scope_name, var_name, value))
 
                                     if changed_vars:
+                                        # Separate locals and globals
+                                        local_vars = [(s, n, v) for s, n, v in changed_vars if s.lower() in ("locals", "local")]
+                                        global_vars = [(s, n, v) for s, n, v in changed_vars if s.lower() in ("globals", "global")]
+                                        
+                                        # Determine scope selection mode
+                                        scope_mode = None  # None = need to select, 'local', 'global', or 'both'
+                                        if local_vars and global_vars:
+                                            scope_mode = 'select'  # Need to choose
+                                            active_vars = None  # Will be set after selection
+                                        elif local_vars:
+                                            scope_mode = 'local'
+                                            active_vars = local_vars
+                                        elif global_vars:
+                                            scope_mode = 'global'
+                                            active_vars = global_vars
+                                        else:
+                                            active_vars = changed_vars  # Fallback to all
+                                        
                                         page = 0
                                         page_size = 10
                                         exploring = True
                                         announce_list = True  # Flag to control list announcement
                                         while exploring:
+                                            # Handle scope selection first if needed
+                                            if scope_mode == 'select' and active_vars is None:
+                                                if self._tts:
+                                                    self._tts.speak("Select scope: 0 for local, 1 for global", interrupt=True)
+                                                
+                                                # Wait for scope selection
+                                                scope_selection = None
+                                                if self._controller:
+                                                    while scope_selection is None:
+                                                        scope_selection = self._controller.wait_for_action(0.2)
+                                                        if scope_selection:
+                                                            if scope_selection.strip().lower() == 'stop_audio':
+                                                                if self._tts:
+                                                                    self._tts.stop()
+                                                                scope_selection = None
+                                                                continue
+                                                            scope_selection = scope_selection.strip().lower()
+                                                            break
+                                                
+                                                if scope_selection == '0':
+                                                    active_vars = local_vars
+                                                    if self._tts:
+                                                        self._tts.speak("Local variables selected", interrupt=True)
+                                                elif scope_selection == '1':
+                                                    active_vars = global_vars
+                                                    if self._tts:
+                                                        self._tts.speak("Global variables selected", interrupt=True)
+                                                elif scope_selection == 'q':
+                                                    exploring = False
+                                                    break
+                                                else:
+                                                    # Default to local
+                                                    active_vars = local_vars
+                                                    if self._tts:
+                                                        self._tts.speak("Defaulting to local variables", interrupt=True)
+                                            
+                                            if not active_vars:
+                                                break
+                                            
                                             start_idx = page * page_size
-                                            end_idx = min(start_idx + page_size, len(changed_vars))
-                                            page_vars = changed_vars[start_idx:end_idx]
+                                            end_idx = min(start_idx + page_size, len(active_vars))
+                                            page_vars = active_vars[start_idx:end_idx]
 
                                             # Update web UI to show enumerated items
                                             if self._controller:
@@ -1296,7 +1353,7 @@ class AutoDebugger:
                                                     explore_mode='changes',  # Exploring changes section
                                                     explore_items=items_payload,
                                                     explore_page=page,
-                                                    explore_total=len(changed_vars),
+                                                    explore_total=len(active_vars),
                                                 )
 
                                             # Audio announcements if enabled (only when announce_list is True)
@@ -1315,10 +1372,16 @@ class AutoDebugger:
                                                     actual_value = value["_parsed"] if isinstance(value, dict) and "_parsed" in value else value
                                                     brief_value = format_nested_value_summary(actual_value)
                                                     self._tts.speak(f"{i}: {var_name} — {brief_value}", interrupt=True)
-                                                if end_idx < len(changed_vars):
-                                                    self._tts.speak("Press 0 to 9 to explore, P for next page, or N to cancel", interrupt=True)
+                                                if end_idx < len(active_vars):
+                                                    if page > 0:
+                                                        self._tts.speak("Press 0 to 9 to explore, N for next page, P for previous, Q to quit", interrupt=True)
+                                                    else:
+                                                        self._tts.speak("Press 0 to 9 to explore, N for next page, Q to quit", interrupt=True)
                                                 else:
-                                                    self._tts.speak("Press 0 to 9 to explore, or N to cancel", interrupt=True)
+                                                    if page > 0:
+                                                        self._tts.speak("Press 0 to 9 to explore, P for previous page, Q to quit", interrupt=True)
+                                                    else:
+                                                        self._tts.speak("Press 0 to 9 to explore, Q to quit", interrupt=True)
                                                 announce_list = False  # Don't announce again until page changes
 
                                             # Await selection
@@ -1354,14 +1417,21 @@ class AutoDebugger:
                                                         self._tts.speak(f"Speed {new_speed}")
                                                         self._wait_for_speech_with_interrupt()
                                                 continue
-                                            if selection == 'n' or selection == 'cancel':
+                                            if selection == 'q' or selection == 'quit':
                                                 exploring = False
                                                 break
-                                            if selection == 'p' and end_idx < len(changed_vars):
-                                                # Stop any current audio before changing pages
+                                            if selection == 'n' and end_idx < len(active_vars):
+                                                # Next page
                                                 if self._tts:
                                                     self._tts.stop()
                                                 page += 1
+                                                announce_list = True  # Re-announce when changing pages
+                                                continue
+                                            if selection == 'p' and page > 0:
+                                                # Previous page
+                                                if self._tts:
+                                                    self._tts.stop()
+                                                page -= 1
                                                 announce_list = True  # Re-announce when changing pages
                                                 continue
                                             if selection.isdigit():
@@ -1407,14 +1477,71 @@ class AutoDebugger:
                                                 all_vars.append((scope_name, var_name, value))
 
                                     if all_vars:
+                                        # Separate locals and globals
+                                        local_vars = [(s, n, v) for s, n, v in all_vars if s.lower() in ("locals", "local")]
+                                        global_vars = [(s, n, v) for s, n, v in all_vars if s.lower() in ("globals", "global")]
+                                        
+                                        # Determine scope selection mode
+                                        scope_mode = None
+                                        if local_vars and global_vars:
+                                            scope_mode = 'select'  # Need to choose
+                                            active_vars = None  # Will be set after selection
+                                        elif local_vars:
+                                            scope_mode = 'local'
+                                            active_vars = local_vars
+                                        elif global_vars:
+                                            scope_mode = 'global'
+                                            active_vars = global_vars
+                                        else:
+                                            active_vars = all_vars  # Fallback to all
+                                        
                                         page = 0
                                         page_size = 10
                                         exploring = True
                                         announce_list = True  # Flag to control list announcement
                                         while exploring:
+                                            # Handle scope selection first if needed
+                                            if scope_mode == 'select' and active_vars is None:
+                                                if self._tts:
+                                                    self._tts.speak("Select scope: 0 for local, 1 for global", interrupt=True)
+                                                
+                                                # Wait for scope selection
+                                                scope_selection = None
+                                                if self._controller:
+                                                    while scope_selection is None:
+                                                        scope_selection = self._controller.wait_for_action(0.2)
+                                                        if scope_selection:
+                                                            if scope_selection.strip().lower() == 'stop_audio':
+                                                                if self._tts:
+                                                                    self._tts.stop()
+                                                                scope_selection = None
+                                                                continue
+                                                            scope_selection = scope_selection.strip().lower()
+                                                            break
+                                                
+                                                if scope_selection == '0':
+                                                    active_vars = local_vars
+                                                    if self._tts:
+                                                        self._tts.speak("Local variables selected", interrupt=True)
+                                                elif scope_selection == '1':
+                                                    active_vars = global_vars
+                                                    if self._tts:
+                                                        self._tts.speak("Global variables selected", interrupt=True)
+                                                elif scope_selection == 'q':
+                                                    exploring = False
+                                                    break
+                                                else:
+                                                    # Default to local
+                                                    active_vars = local_vars
+                                                    if self._tts:
+                                                        self._tts.speak("Defaulting to local variables", interrupt=True)
+                                            
+                                            if not active_vars:
+                                                break
+                                            
                                             start_idx = page * page_size
-                                            end_idx = min(start_idx + page_size, len(all_vars))
-                                            page_vars = all_vars[start_idx:end_idx]
+                                            end_idx = min(start_idx + page_size, len(active_vars))
+                                            page_vars = active_vars[start_idx:end_idx]
 
                                             # Update web UI to show enumerated items
                                             if self._controller:
@@ -1432,7 +1559,7 @@ class AutoDebugger:
                                                     explore_mode='variables',  # Exploring variables section
                                                     explore_items=items_payload,
                                                     explore_page=page,
-                                                    explore_total=len(all_vars),
+                                                    explore_total=len(active_vars),
                                                 )
 
                                             # Audio announcements (only when announce_list is True)
@@ -1450,10 +1577,16 @@ class AutoDebugger:
                                                     # Value is already parsed/fetched - use directly
                                                     brief_value = format_nested_value_summary(value)
                                                     self._tts.speak(f"{i}: {var_name} — {brief_value}", interrupt=True)
-                                                if end_idx < len(all_vars):
-                                                    self._tts.speak("Press 0 to 9 to explore, P for next page, or N to cancel", interrupt=True)
+                                                if end_idx < len(active_vars):
+                                                    if page > 0:
+                                                        self._tts.speak("Press 0 to 9 to explore, N for next page, P for previous, Q to quit", interrupt=True)
+                                                    else:
+                                                        self._tts.speak("Press 0 to 9 to explore, N for next page, Q to quit", interrupt=True)
                                                 else:
-                                                    self._tts.speak("Press 0 to 9 to explore, or N to cancel", interrupt=True)
+                                                    if page > 0:
+                                                        self._tts.speak("Press 0 to 9 to explore, P for previous page, Q to quit", interrupt=True)
+                                                    else:
+                                                        self._tts.speak("Press 0 to 9 to explore, Q to quit", interrupt=True)
                                                 announce_list = False  # Don't announce again until page changes
 
                                             # Await selection
@@ -1489,14 +1622,21 @@ class AutoDebugger:
                                                         self._tts.speak(f"Speed {new_speed}")
                                                         self._wait_for_speech_with_interrupt()
                                                 continue
-                                            if selection == 'n' or selection == 'cancel':
+                                            if selection == 'q' or selection == 'quit':
                                                 exploring = False
                                                 break
-                                            if selection == 'p' and end_idx < len(all_vars):
-                                                # Stop any current audio before changing pages
+                                            if selection == 'n' and end_idx < len(active_vars):
+                                                # Next page
                                                 if self._tts:
                                                     self._tts.stop()
                                                 page += 1
+                                                announce_list = True  # Re-announce when changing pages
+                                                continue
+                                            if selection == 'p' and page > 0:
+                                                # Previous page
+                                                if self._tts:
+                                                    self._tts.stop()
+                                                page -= 1
                                                 announce_list = True  # Re-announce when changing pages
                                                 continue
                                             if selection.isdigit():
