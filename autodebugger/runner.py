@@ -943,40 +943,20 @@ class AutoDebugger:
                                         pass
                                     return ""
                                 
-                                # Don't automatically read variables - only changes
-                                # Variables can be read on demand with 'v' key
-                                
-                                # Announce changes with clean parsed values
+                                # Don't automatically read variables or full changes. Variables can be read with 'v'.
+                                # For changes, only announce the count; details available with 'e' (explore changes).
                                 if variables_delta:
-                                    # Extract clean values for TTS announcement
                                     clean_delta = self._extract_display_values(variables_delta)
-                                    
-                                    # Count total changes
                                     total_changes = 0
-                                    change_parts = []
-                                    
                                     for scope_name, scope_vars in clean_delta.items():
                                         if isinstance(scope_vars, dict) and not scope_name.startswith('_'):
-                                            for var_name, var_value in scope_vars.items():
+                                            for var_name in scope_vars.keys():
                                                 if not var_name.startswith('_'):
                                                     total_changes += 1
-                                                    # Use summarize_value for each individual value
-                                                    summary = summarize_value(var_value, 60)
-                                                    change_parts.append(f"{var_name} = {summary}")
-                                    
-                                    if change_parts:
-                                        # Announce number of changes first
-                                        if total_changes == 1:
-                                            self._tts.speak(f"1 change:")
-                                        else:
-                                            self._tts.speak(f"{total_changes} changes:")
+                                    if total_changes > 0:
+                                        msg = "1 change. Press E to explore" if total_changes == 1 else f"{total_changes} changes. Press E to explore"
+                                        self._tts.speak(msg)
                                         self._wait_for_speech_with_interrupt()
-                                        
-                                        # Then announce each change
-                                        for change in change_parts:
-                                            self._tts.speak(change)
-                                            print(f"[TTS] {change}")
-                                            self._wait_for_speech_with_interrupt()
                             
                             # Loop while at this stopped event to allow multiple actions
                             while True:
