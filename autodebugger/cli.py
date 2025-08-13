@@ -36,6 +36,7 @@ def main() -> None:  # pragma: no cover
 @click.option("--manual-audio/--no-manual-audio", "manual_audio", default=False, help="Speak current line and changes during manual stepping.")
 @click.option("--manual-voice", "manual_voice", type=str, default=None, help="Voice name for macOS 'say' in manual audio mode.")
 @click.option("--manual-rate", "manual_rate_wpm", type=int, default=210, show_default=True, help="Speech rate for manual audio mode.")
+@click.option("--max-loop-iterations", "max_loop_iterations", type=int, default=None, help="Maximum iterations allowed in a loop before aborting (resource management).")
 @click.argument("script", type=click.Path(exists=True))
 @click.argument("script_args", nargs=-1)
 def run_cmd(
@@ -49,9 +50,11 @@ def run_cmd(
     manual_audio: bool,
     manual_voice: Optional[str],
     manual_rate_wpm: int,
+    max_loop_iterations: Optional[int],
     script: str,
     script_args: tuple[str, ...],
 ) -> None:
+    print(f"[CLI DEBUG] Starting with max_loop_iterations={max_loop_iterations}", file=sys.stderr, flush=True)
     dbg = AutoDebugger(python_exe=python_exe, db_path=db_path)
     session_id = dbg.run(
         script,
@@ -64,6 +67,7 @@ def run_cmd(
         manual_audio=manual_audio,
         manual_voice=manual_voice,
         manual_rate_wpm=manual_rate_wpm,
+        max_loop_iterations=max_loop_iterations,
     )
     click.echo(session_id)
 

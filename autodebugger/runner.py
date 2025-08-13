@@ -472,8 +472,13 @@ class AutoDebugger:
         manual_audio: bool = False,
         manual_voice: Optional[str] = None,
         manual_rate_wpm: int = 210,
+        max_loop_iterations: Optional[int] = None,
     ) -> str:
         script_abs = os.path.abspath(script_path)
+        
+        # Debug output for resource management
+        if max_loop_iterations is not None:
+            print(f"[DEBUG] Max loop iterations set to: {max_loop_iterations}", file=sys.stderr, flush=True)
         
         # Parse manual_from trigger
         manual_trigger_file: Optional[str] = None
@@ -570,6 +575,12 @@ class AutoDebugger:
         except Exception:
             pass
 
+        # Loop iteration tracking for resource management
+        loop_iteration_counts: Dict[Tuple[str, int], int] = {}  # (file_path, line_no) -> iteration count
+        loop_entry_tracking: Dict[Tuple[str, int], bool] = {}  # Track if we're inside a loop
+        loop_stack: List[Tuple[str, int]] = []  # Stack of nested loops
+        max_iterations = max_loop_iterations if max_loop_iterations else float('inf')
+
         self.db.open()
         self.db.create_session(
             SessionSummary(
@@ -582,18 +593,24 @@ class AutoDebugger:
                 git_dirty=git_dirty,
             )
         )
+        
+        print(f"[DEBUG] Starting debugger for: {script_abs}", file=sys.stderr, flush=True)
+        print(f"[DEBUG] Session ID: {self.session_id}", file=sys.stderr, flush=True)
 
         self._start_adapter()
         try:
             # Connect DAP client with retries while adapter starts
+            print(f"[DEBUG] Connecting to adapter at {self.adapter_host}:{self.adapter_port}", file=sys.stderr, flush=True)
             client = DapClient(self.adapter_host, self.adapter_port, timeout=10)
             start = time.time()
             while True:
                 try:
                     client.connect()
+                    print(f"[DEBUG] Connected to adapter", file=sys.stderr, flush=True)
                     break
                 except ConnectionRefusedError:
                     if time.time() - start > 15.0:
+                        print(f"[DEBUG] Failed to connect after 15 seconds", file=sys.stderr, flush=True)
                         raise
                     time.sleep(0.1)
             self.client = client
@@ -954,6 +971,69 @@ class AutoDebugger:
                                     code = lines[line - 1].rstrip("\n")
                         except Exception:
                             code = ""
+
+                        # Loop iteration tracking for resource management
+                        if max_loop_iterations is not None:
+                            current_location = (file_path, line)
+                            stripped_code = code.strip()
+                            
+                            # Detect loop headers (for, while)
+                            is_loop_header = (
+                                stripped_code.startswith("for ") or 
+                                stripped_code.startswith("while ")
+                            )
+                            
+                            if is_loop_header:
+                                print(f"[LOOP DEBUG] Found loop at {os.path.basename(file_path)}:{line}: {stripped_code[:50]}", file=sys.stderr, flush=True)
+                                # We're at a loop header
+                                if current_location not in loop_iteration_counts:
+                                    # First time seeing this loop
+                                    loop_iteration_counts[current_location] = 1
+                                    loop_stack.append(current_location)
+                                elif current_location in loop_stack:
+                                    # We're revisiting this loop header (another iteration)
+                                    loop_iteration_counts[current_location] += 1
+                                    
+                                    # Check if we've exceeded max iterations
+                                    if loop_iteration_counts[current_location] > max_iterations:
+                                        error_msg = f"Loop at {os.path.basename(file_path)}:{line} exceeded maximum iterations ({max_iterations})"
+                                        print(f"\n[RESOURCE LIMIT] {error_msg}\n", flush=True)
+                                        
+                                        # Abort debug session
+                                        try:
+                                            client.request("disconnect", {"terminateDebuggee": True}, wait=2.0)
+                                        except Exception:
+                                            pass
+                                        
+                                        # Record in database
+                                        self.db.end_session(self.session_id, utc_now_iso())
+                                        # TODO: Add error tracking to database if needed
+                                        return self.session_id
+                                else:
+                                    # Re-entering a loop after exiting (nested case)
+                                    loop_iteration_counts[current_location] = 1
+                                    loop_stack.append(current_location)
+                            else:
+                                # Not a loop header - check if we've exited any loops
+                                # Simple heuristic: if we're outside the range of loop body
+                                # This is simplified - a full implementation would track scope better
+                                new_stack = []
+                                for loop_loc in loop_stack:
+                                    loop_file, loop_line = loop_loc
+                                    if loop_file == file_path:
+                                        # Check if we're still within reasonable range of the loop
+                                        # (this is a heuristic - loops typically span ~10-50 lines)
+                                        if abs(line - loop_line) < 100:
+                                            new_stack.append(loop_loc)
+                                        else:
+                                            # We've likely exited this loop, reset its counter
+                                            if loop_loc in loop_iteration_counts:
+                                                del loop_iteration_counts[loop_loc]
+                                    else:
+                                        # Different file, we've exited the loop
+                                        if loop_loc in loop_iteration_counts:
+                                            del loop_iteration_counts[loop_loc]
+                                loop_stack[:] = new_stack
 
                         # For dirty/no-git sessions: snapshot original file content once
                         try:
