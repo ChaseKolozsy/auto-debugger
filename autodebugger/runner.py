@@ -476,6 +476,7 @@ class AutoDebugger:
         max_loop_iterations: Optional[int] = None,
         max_memory_mb: Optional[int] = None,
         max_disk_usage_mb: Optional[int] = None,
+        record_resources: bool = False,
     ) -> str:
         script_abs = os.path.abspath(script_path)
         
@@ -486,6 +487,8 @@ class AutoDebugger:
             print(f"[DEBUG] Max memory usage set to: {max_memory_mb} MB", file=sys.stderr, flush=True)
         if max_disk_usage_mb is not None:
             print(f"[DEBUG] Max disk usage increase set to: {max_disk_usage_mb} MB", file=sys.stderr, flush=True)
+        if record_resources:
+            print(f"[DEBUG] Resource recording enabled", file=sys.stderr, flush=True)
         
         # Parse manual_from trigger
         manual_trigger_file: Optional[str] = None
@@ -1213,6 +1216,30 @@ class AutoDebugger:
                         variables_delta = compute_delta(vars_payload, prev_vars)
                         prev_vars = vars_payload
 
+                        # Collect resource data if recording is enabled
+                        loop_iteration_value = None
+                        memory_usage_mb_value = None
+                        disk_usage_increase_mb_value = None
+                        
+                        if record_resources:
+                            # Get current loop iteration if in a loop
+                            current_location = (file_path, line)
+                            if current_location in loop_iteration_counts:
+                                loop_iteration_value = loop_iteration_counts[current_location]
+                            
+                            # Get memory usage
+                            if process_pid is not None:
+                                current_memory = get_process_memory_usage()
+                                if current_memory is not None:
+                                    memory_usage_mb_value = current_memory / (1024 * 1024)
+                            
+                            # Get disk usage increase
+                            if initial_disk_usage is not None:
+                                current_disk_usage = get_disk_usage()
+                                if current_disk_usage is not None:
+                                    disk_increase = current_disk_usage - initial_disk_usage
+                                    disk_usage_increase_mb_value = disk_increase / (1024 * 1024)
+
                         self.db.add_line_report(
                             LineReport(
                                 session_id=self.session_id,
@@ -1229,6 +1256,9 @@ class AutoDebugger:
                                 error_message=error_message,
                                 error_type=error_type,
                                 stack_trace=stack_trace_text,
+                                loop_iteration=loop_iteration_value,
+                                memory_usage_mb=memory_usage_mb_value,
+                                disk_usage_increase_mb=disk_usage_increase_mb_value,
                             )
                         )
                         

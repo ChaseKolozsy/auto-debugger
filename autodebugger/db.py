@@ -27,6 +27,10 @@ class LineReport:
     error_message: Optional[str] = None
     error_type: Optional[str] = None
     stack_trace: Optional[str] = None
+    # Resource tracking fields
+    loop_iteration: Optional[int] = None  # Current iteration count if in a loop
+    memory_usage_mb: Optional[float] = None  # Memory usage in MB
+    disk_usage_increase_mb: Optional[float] = None  # Disk usage increase since start in MB
 
 
 @dataclass
@@ -58,6 +62,7 @@ class LineReportStore:
         self._create_tables()
         self._ensure_delta_column()
         self._ensure_git_columns()
+        self._ensure_resource_columns()
 
     def close(self) -> None:
         if self.conn is not None:
@@ -171,6 +176,27 @@ class LineReportStore:
         if to_add:
             self.conn.commit()
 
+    def _ensure_resource_columns(self) -> None:
+        """Ensure resource tracking columns exist in line_reports table."""
+        assert self.conn is not None
+        cur = self.conn.cursor()
+        cur.execute("PRAGMA table_info(line_reports)")
+        cols = [r[1] for r in cur.fetchall()]
+        to_add = []
+        if "loop_iteration" not in cols:
+            to_add.append(("loop_iteration", "INTEGER"))
+        if "memory_usage_mb" not in cols:
+            to_add.append(("memory_usage_mb", "REAL"))
+        if "disk_usage_increase_mb" not in cols:
+            to_add.append(("disk_usage_increase_mb", "REAL"))
+        for name, coltype in to_add:
+            try:
+                cur.execute(f"ALTER TABLE line_reports ADD COLUMN {name} {coltype}")
+            except sqlite3.OperationalError:
+                pass
+        if to_add:
+            self.conn.commit()
+
     def create_session(self, summary: SessionSummary) -> None:
         assert self.conn is not None
         cur = self.conn.cursor()
@@ -220,8 +246,9 @@ class LineReportStore:
             INSERT INTO line_reports(
               session_id,file,line_number,code,timestamp,
               variables,variables_delta,stack_depth,thread_id,observations,
-              status,error_message,error_type,stack_trace
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+              status,error_message,error_type,stack_trace,
+              loop_iteration,memory_usage_mb,disk_usage_increase_mb
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 report.session_id,
@@ -238,6 +265,9 @@ class LineReportStore:
                 report.error_message,
                 report.error_type,
                 report.stack_trace,
+                report.loop_iteration,
+                report.memory_usage_mb,
+                report.disk_usage_increase_mb,
             ),
         )
         last_id = cur.lastrowid

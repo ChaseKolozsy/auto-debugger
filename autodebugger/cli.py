@@ -39,6 +39,7 @@ def main() -> None:  # pragma: no cover
 @click.option("--max-loop-iterations", "max_loop_iterations", type=int, default=None, help="Maximum iterations allowed in a loop before aborting (resource management).")
 @click.option("--max-memory-mb", "max_memory_mb", type=int, default=None, help="Maximum memory usage in MB before aborting (resource management).")
 @click.option("--max-disk-usage-mb", "max_disk_usage_mb", type=int, default=None, help="Maximum disk usage increase in MB before aborting (resource management).")
+@click.option("--record-resources/--no-record-resources", "record_resources", default=False, help="Record resource usage (loop iterations, memory, disk) for each line executed.")
 @click.argument("script", type=click.Path(exists=True))
 @click.argument("script_args", nargs=-1)
 def run_cmd(
@@ -55,10 +56,11 @@ def run_cmd(
     max_loop_iterations: Optional[int],
     max_memory_mb: Optional[int],
     max_disk_usage_mb: Optional[int],
+    record_resources: bool,
     script: str,
     script_args: tuple[str, ...],
 ) -> None:
-    print(f"[CLI DEBUG] Starting with max_loop_iterations={max_loop_iterations}, max_memory_mb={max_memory_mb}, max_disk_usage_mb={max_disk_usage_mb}", file=sys.stderr, flush=True)
+    print(f"[CLI DEBUG] Starting with max_loop_iterations={max_loop_iterations}, max_memory_mb={max_memory_mb}, max_disk_usage_mb={max_disk_usage_mb}, record_resources={record_resources}", file=sys.stderr, flush=True)
     dbg = AutoDebugger(python_exe=python_exe, db_path=db_path)
     session_id = dbg.run(
         script,
@@ -74,6 +76,7 @@ def run_cmd(
         max_loop_iterations=max_loop_iterations,
         max_memory_mb=max_memory_mb,
         max_disk_usage_mb=max_disk_usage_mb,
+        record_resources=record_resources,
     )
     click.echo(session_id)
 
