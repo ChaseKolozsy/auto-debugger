@@ -801,11 +801,7 @@ class AutoDebugger:
                                 self._goto_target_line = None
                                 
                                 # Continue normally from here
-                            elif manual_mode_active:
-                                # Still in goto mode and haven't reached target
-                                # Skip all the manual prompting and just step
-                                client.request("stepIn", {"threadId": thread_id})
-                                continue  # Skip the rest of the loop
+                            # Don't skip anything here - let it record the line!
 
                         # Snapshot the file content the first time we encounter it in this session
                         # This ensures the UI can fetch function details from the exact source that ran,
@@ -941,74 +937,90 @@ class AutoDebugger:
                         )
                         
                         # Handle manual stepping
-                        if manual_mode_active and not self._goto_mode_active:
-                            # Update controller state (skip if in goto mode)
-                            if self._controller:
-                                # Convert to display format for web view
-                                display_vars = self._extract_display_values(vars_payload)
-                                display_delta = self._extract_display_values(variables_delta) if variables_delta else {}
-                                self._controller.update_state(
-                                    session_id=self.session_id,
-                                    file=file_path,
-                                    line=line,
-                                    code=code,
-                                    variables=display_vars,
-                                    variables_delta=display_delta,
-                                    waiting=True,
-                                    mode='manual'
+                        if manual_mode_active:
+                            # If in goto mode, skip all interaction and just step
+                            if self._goto_mode_active:
+                                # Update controller state to show we're fast-forwarding
+                                if self._controller:
+                                    self._controller.update_state(
+                                        session_id=self.session_id,
+                                        file=file_path,
+                                        line=line,
+                                        code=code,
+                                        waiting=False,
+                                        mode='goto'
+                                    )
+                                # Don't wait for input, just step immediately
+                                should_step_after = True
+                            else:
+                                # Normal manual mode with user interaction
+                                # Update controller state
+                                if self._controller:
+                                    # Convert to display format for web view
+                                    display_vars = self._extract_display_values(vars_payload)
+                                    display_delta = self._extract_display_values(variables_delta) if variables_delta else {}
+                                    self._controller.update_state(
+                                        session_id=self.session_id,
+                                        file=file_path,
+                                        line=line,
+                                        code=code,
+                                        variables=display_vars,
+                                        variables_delta=display_delta,
+                                        waiting=True,
+                                        mode='manual'
+                                    )
+                                
+                                # Speak current line if audio enabled (but skip in goto mode)
+                                should_speak = self._tts and not self._goto_mode_active and (
+                                    not self._controller or 
+                                    not hasattr(self._controller, 'is_audio_enabled') or 
+                                    self._controller.is_audio_enabled()
                                 )
-                            
-                            # Speak current line if audio enabled
-                            should_speak = self._tts and (
-                                not self._controller or 
-                                not hasattr(self._controller, 'is_audio_enabled') or 
-                                self._controller.is_audio_enabled()
-                            )
-                            
-                            if should_speak:
-                                # Track if we're entering a new function
-                                if not hasattr(self, '_last_announced_function'):
-                                    self._last_announced_function = None
                                 
-                                current_function = None
-                                should_announce_function = False
-                                
-                                if self._controller and hasattr(self._controller.shared_state, 'get_state'):
-                                    state = self._controller.shared_state.get_state()
-                                    current_function = state.get('function_name')
-                                    panel_open = state.get('function_panel_open', False)
+                                if should_speak:
+                                    # Track if we're entering a new function
+                                    if not hasattr(self, '_last_announced_function'):
+                                        self._last_announced_function = None
                                     
-                                    # Check if this is a new function and panel is open
-                                    if current_function != self._last_announced_function:
-                                        if current_function and panel_open:
-                                            should_announce_function = True
-                                        self._last_announced_function = current_function
-                                
-                                # Build the announcement
-                                if should_announce_function:
-                                    # Include function context in the announcement
-                                    state = self._controller.shared_state.get_state()
-                                    func_sig = state.get('function_sig', '')
-                                    func_body = state.get('function_body', '')
+                                    current_function = None
+                                    should_announce_function = False
                                     
-                                    announcement = f"Entering function {current_function}. "
-                                    if func_sig:
-                                        announcement += f"Signature: {func_sig}. "
-                                    if func_body:
-                                        # Don't truncate too aggressively - allow reasonable function bodies
-                                        # The extraction already limits to 3000 chars
-                                        announcement += f"Body: {func_body}. "
-                                    announcement += f"Line {line}: {code}"
-                                else:
-                                    # Just announce the line
-                                    announcement = f"Line {line}: {code}"
-                                
-                                # Speak with interrupt to clear any previous speech
-                                # Mark as code since it contains code snippets
-                                self._tts.speak(announcement, interrupt=True, is_code=True)
-                                
-                                # Wait for main announcement to finish before scope
-                                self._wait_for_speech_with_interrupt()
+                                    if self._controller and hasattr(self._controller.shared_state, 'get_state'):
+                                        state = self._controller.shared_state.get_state()
+                                        current_function = state.get('function_name')
+                                        panel_open = state.get('function_panel_open', False)
+                                        
+                                        # Check if this is a new function and panel is open
+                                        if current_function != self._last_announced_function:
+                                            if current_function and panel_open:
+                                                should_announce_function = True
+                                            self._last_announced_function = current_function
+                                    
+                                    # Build the announcement
+                                    if should_announce_function:
+                                        # Include function context in the announcement
+                                        state = self._controller.shared_state.get_state()
+                                        func_sig = state.get('function_sig', '')
+                                        func_body = state.get('function_body', '')
+                                        
+                                        announcement = f"Entering function {current_function}. "
+                                        if func_sig:
+                                            announcement += f"Signature: {func_sig}. "
+                                        if func_body:
+                                            # Don't truncate too aggressively - allow reasonable function bodies
+                                            # The extraction already limits to 3000 chars
+                                            announcement += f"Body: {func_body}. "
+                                        announcement += f"Line {line}: {code}"
+                                    else:
+                                        # Just announce the line
+                                        announcement = f"Line {line}: {code}"
+                                    
+                                    # Speak with interrupt to clear any previous speech
+                                    # Mark as code since it contains code snippets
+                                    self._tts.speak(announcement, interrupt=True, is_code=True)
+                                    
+                                    # Wait for main announcement to finish before scope
+                                    self._wait_for_speech_with_interrupt()
                                 
                                 # Summarize scope
                                 def _scope_brief(variables: Dict[str, Any], max_pairs: int = 10) -> str:
@@ -1054,8 +1066,8 @@ class AutoDebugger:
                                         self._tts.speak(msg)
                                         self._wait_for_speech_with_interrupt()
                             
-                            # Loop while at this stopped event to allow multiple actions
-                            while True:
+                            # Loop while at this stopped event to allow multiple actions (skip in goto mode)
+                            while not self._goto_mode_active:
                                 # Wait for user action
                                 action = None
                                 if self._controller:
