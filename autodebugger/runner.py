@@ -1504,15 +1504,12 @@ class AutoDebugger:
                                                 if 0 <= idx < len(page_vars):
                                                     _scope, var_name, value = page_vars[idx]
                                                     if self._tts:
-                                                        self._tts.speak(f"Exploring {var_name}")
-                                                        self._wait_for_speech_with_interrupt()
+                                                        # Stop any current audio before starting new selection
+                                                        self._tts.stop()
                                                     if self._nested_explorer:
                                                         # Read the complete structure naturally
                                                         self._nested_explorer.read_complete_structure(var_name, value)
-                                                    # Just a brief prompt to indicate ready for next selection
-                                                    if self._tts:
-                                                        self._tts.speak("Select another or N to cancel", interrupt=True)
-                                                        # Don't wait - allow immediate next selection
+                                                    # Don't announce "Select another" - it interrupts the variable content
                                                 else:
                                                     if self._tts:
                                                         self._tts.speak(f"Invalid selection {selection}")
