@@ -10,10 +10,13 @@ import subprocess
 import shlex
 import time
 import threading
+import re
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 from dataclasses import dataclass
+from urllib import request as _urlreq
+from urllib import error as _urlerr
 
 from fastmcp import FastMCP
 
@@ -21,12 +24,50 @@ from fastmcp import FastMCP
 mcp = FastMCP("autodebug-mcp", version="0.3.0")
 
 # Store active debugging sessions
+class HttpControllerProxy:
+    """Minimal HTTP client to talk to the manual web controller."""
+
+    def __init__(self, base_url: str) -> None:
+        # base_url example: http://127.0.0.1:59365
+        self.base_url = base_url.rstrip("/")
+
+    def _request(self, method: str, path: str, data: Optional[Dict[str, Any]] = None, timeout: float = 2.5) -> Tuple[int, Dict[str, Any]]:
+        url = f"{self.base_url}{path}"
+        headers = {"Content-Type": "application/json"}
+        body: Optional[bytes] = None
+        if data is not None:
+            body = json.dumps(data).encode("utf-8")
+        req = _urlreq.Request(url, data=body, headers=headers, method=method)
+        try:
+            with _urlreq.urlopen(req, timeout=timeout) as resp:
+                status = resp.getcode()
+                raw = resp.read()
+        except _urlerr.HTTPError as e:
+            status = e.code
+            raw = e.read()
+        except Exception:
+            return 0, {}
+        try:
+            payload = json.loads(raw.decode("utf-8")) if raw else {}
+        except Exception:
+            payload = {}
+        return status, payload
+
+    def send_action(self, action: str) -> bool:
+        code, _ = self._request("POST", "/command", {"action": action})
+        return 200 <= code < 300
+
+    def fetch_state(self) -> Dict[str, Any]:
+        code, payload = self._request("GET", "/state")
+        return payload if 200 <= code < 300 else {}
+
+
 @dataclass
 class ActiveSession:
     """Represents an active debugging session."""
     session_id: str
     process: subprocess.Popen
-    controller: Any  # HttpStepController instance
+    controller: Any  # HttpControllerProxy instance, once discovered
     current_line: int = 0
     current_file: str = ""
     current_code: str = ""
@@ -34,6 +75,7 @@ class ActiveSession:
     variables_delta: Dict[str, Any] = None
     is_waiting: bool = False
     mode: str = "manual"
+    controller_url: Optional[str] = None
     
     def __post_init__(self):
         if self.variables is None:
@@ -336,7 +378,7 @@ def create_debug_session(
     session_id = f"agent_{uuid.uuid4().hex[:12]}"
     
     # Build command
-    cmd = [python_exe or "python", "-m", "autodebugger", "run", "--manual"]
+    cmd = [python_exe or "python", "-m", "autodebugger", "run", "--manual", "--manual-web"]
     
     # Add database path if specified
     if db:
@@ -377,6 +419,39 @@ def create_debug_session(
         
         with sessions_lock:
             active_sessions[session_id] = session
+
+        # Monitor stdout/stderr to discover the controller port and track lifecycle
+        def _monitor_io() -> None:
+            url_re = re.compile(r"http://127\\.0\\.0\\.1:(\\d+)")
+            streams = [process.stdout, process.stderr]
+            discovered = False
+            try:
+                while True:
+                    if process.poll() is not None:
+                        break
+                    for s in streams:
+                        if not s:
+                            continue
+                        line = s.readline()
+                        if not line:
+                            continue
+                        m = url_re.search(line)
+                        if m and not discovered:
+                            port = m.group(1)
+                            base = f"http://127.0.0.1:{port}"
+                            proxy = HttpControllerProxy(base)
+                            with sessions_lock:
+                                sess = active_sessions.get(session_id)
+                                if sess is not None:
+                                    sess.controller = proxy
+                                    sess.controller_url = base
+                            discovered = True
+                    # Avoid tight loop
+                    time.sleep(0.05)
+            except Exception:
+                pass
+
+        threading.Thread(target=_monitor_io, name=f"autodebug-monitor-{session_id}", daemon=True).start()
         
         return {
             "success": True,
@@ -411,18 +486,59 @@ def step_debug_session(
     
     if not session:
         return {"success": False, "error": f"Session {session_id} not found"}
-    
-    # Send action to the debugger
-    # This would interact with the controller
-    # For now, return current state
+
+    # Ensure controller is discovered
+    if session.controller is None:
+        # Wait briefly for controller discovery
+        deadline = time.time() + 3.0
+        while time.time() < deadline and session.controller is None:
+            time.sleep(0.1)
+        if session.controller is None:
+            return {
+                "success": False,
+                "error": "Controller not ready for session. Ensure --manual-web is enabled and wait a moment."
+            }
+
+    # Send action to the manual web controller
+    ok = False
+    try:
+        ok = session.controller.send_action(action)
+    except Exception as e:
+        return {"success": False, "error": f"Failed to send action: {e}"}
+
+    # Poll latest state
+    latest_state: Dict[str, Any] = {}
+    deadline = time.time() + 3.0
+    while time.time() < deadline:
+        try:
+            state = session.controller.fetch_state()
+        except Exception:
+            state = {}
+        if state:
+            latest_state = state
+            # Basic heuristic: if waiting flag changed or line/file updated, we can stop early
+            break
+        time.sleep(0.1)
+
+    # Update cached fields
+    if latest_state:
+        session.current_line = int(latest_state.get("line") or 0)
+        session.current_file = str(latest_state.get("file") or "")
+        session.current_code = str(latest_state.get("code") or "")
+        session.is_waiting = bool(latest_state.get("waiting", False))
+        session.mode = str(latest_state.get("mode") or session.mode)
+        session.variables = latest_state.get("variables") or {}
+        session.variables_delta = latest_state.get("variables_delta") or {}
+
     return {
-        "success": True,
+        "success": ok,
         "session_id": session_id,
         "action": action,
         "current_line": session.current_line,
         "current_file": session.current_file,
         "current_code": session.current_code,
-        "is_waiting": session.is_waiting
+        "is_waiting": session.is_waiting,
+        "controller_url": session.controller_url,
     }
 
 @mcp.tool
@@ -646,16 +762,32 @@ def get_current_state(
     
     if not session:
         return {"success": False, "error": f"Session {session_id} not found"}
-    
+
+    # If we have a controller, prefer live state
+    latest_state: Dict[str, Any] = {}
+    if session.controller is not None:
+        try:
+            latest_state = session.controller.fetch_state() or {}
+        except Exception:
+            latest_state = {}
+        if latest_state:
+            session.current_line = int(latest_state.get("line") or 0)
+            session.current_file = str(latest_state.get("file") or "")
+            session.current_code = str(latest_state.get("code") or "")
+            session.is_waiting = bool(latest_state.get("waiting", False))
+            session.mode = str(latest_state.get("mode") or session.mode)
+            session.variables = latest_state.get("variables") or {}
+            session.variables_delta = latest_state.get("variables_delta") or {}
+
     # Import here to get summarization functions
     import sys
     from pathlib import Path
     autodebugger_path = Path(__file__).parent.parent / "autodebugger"
     if str(autodebugger_path) not in sys.path:
         sys.path.insert(0, str(autodebugger_path))
-    
+
     from common import summarize_value, summarize_delta
-    
+
     # Summarize variables
     var_summary = {}
     for scope, vars_dict in (session.variables or {}).items():
@@ -664,10 +796,10 @@ def get_current_state(
                 name: summarize_value(value, 60)
                 for name, value in vars_dict.items()
             }
-    
+
     # Summarize changes
     changes_summary = summarize_delta(session.variables_delta or {})
-    
+
     return {
         "success": True,
         "session_id": session_id,
@@ -678,7 +810,8 @@ def get_current_state(
         "variables_summary": var_summary,
         "changes_summary": changes_summary,
         "full_variables": session.variables,
-        "full_changes": session.variables_delta
+        "full_changes": session.variables_delta,
+        "controller_url": session.controller_url,
     }
 
 if __name__ == "__main__":

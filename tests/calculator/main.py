@@ -1,5 +1,4 @@
-# Try absolute imports first (when run with proper PYTHONPATH)
-# Fall back to simple imports if that fails
+
 try:
     from calculator import Calculator
     from calculator.ops.add import Add
