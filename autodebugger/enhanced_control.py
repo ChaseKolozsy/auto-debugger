@@ -937,6 +937,7 @@ class StepControlHandler(BaseHTTPRequestHandler):
                 // Prompt for line number
                 const lineNum = prompt('Enter line number to go to:');
                 if (lineNum && !isNaN(parseInt(lineNum))) {
+                    // Send a check request first to validate the line
                     sendAction('goto:' + lineNum);
                 }
             } else if (e.key >= '0' && e.key <= '9') {
@@ -1020,7 +1021,12 @@ class HttpStepController:
         # Give server time to start
         import time
         time.sleep(0.1)
-        print(f"\n[manual-web] Open http://127.0.0.1:{self.port} to control stepping.\n", flush=True)
+        
+        # Auto-open browser
+        import webbrowser
+        url = f"http://127.0.0.1:{self.port}"
+        print(f"\n[manual-web] Opening {url} in browser...\n", flush=True)
+        webbrowser.open(url)
     
     def stop(self):
         """Stop the HTTP server."""

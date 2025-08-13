@@ -41,6 +41,55 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def find_alternative_executable_lines(file_path: str, target_line: int) -> Tuple[Optional[int], Optional[int], bool]:
+    """Find alternative executable lines near the target.
+    
+    Returns: (line_before, line_after, is_target_executable)
+    """
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        
+        def is_executable(idx: int) -> bool:
+            if idx < 1 or idx > len(lines):
+                return False
+            text = lines[idx - 1]
+            stripped = text.strip()
+            # Skip empty lines and comments
+            if not stripped or stripped.startswith('#'):
+                return False
+            # Skip docstrings and multiline strings
+            if '"""' in stripped or "'''" in stripped:
+                return False
+            # Check if likely executable
+            if any(kw in text for kw in ['=', 'if ', 'for ', 'while ', 'def ', 'class ', 'return', 'print', 'import']):
+                return True
+            elif not text.startswith(' ') and not text.startswith('\t'):
+                return True
+            return False
+        
+        # Check if target is executable
+        is_target_exec = is_executable(target_line)
+        
+        # Find nearest before
+        line_before = None
+        for idx in range(target_line - 1, 0, -1):
+            if is_executable(idx):
+                line_before = idx
+                break
+        
+        # Find nearest after
+        line_after = None
+        for idx in range(target_line + 1, len(lines) + 1):
+            if is_executable(idx):
+                line_after = idx
+                break
+        
+        return (line_before, line_after, is_target_exec)
+    except Exception:
+        return (None, None, False)
+
+
 def find_nearest_executable_line(file_path: str, target_line: int) -> int:
     """Find the nearest executable line to the target line number.
     
@@ -1094,35 +1143,73 @@ class AutoDebugger:
                                     # Handle goto line command
                                     try:
                                         target_line = int(action.split(':')[1])
-                                        # Find nearest executable line from target
-                                        actual_target = find_nearest_executable_line(file_path, target_line)
+                                        # Check if line is executable and find alternatives
+                                        line_before, line_after, is_executable = find_alternative_executable_lines(file_path, target_line)
                                         
-                                        if actual_target > 0:
-                                            # Save current audio state and mute
-                                            if self._controller and hasattr(self._controller, 'is_audio_enabled'):
-                                                self._audio_state_before_goto = self._controller.is_audio_enabled()
-                                                # Temporarily disable audio for fast-forward
-                                                if self._controller and hasattr(self._controller, 'set_audio_state'):
-                                                    self._controller.set_audio_state(enabled=False, available=True)
+                                        if not is_executable:
+                                            # Line is not executable, offer alternatives
+                                            alternatives = []
+                                            if line_before:
+                                                alternatives.append(f"Line {line_before} (before)")
+                                            if line_after:
+                                                alternatives.append(f"Line {line_after} (after)")
                                             
-                                            # Stop any current audio
-                                            if self._tts:
-                                                self._tts.stop()
-                                            
-                                            # Set goto mode
-                                            self._goto_target_line = actual_target
-                                            self._goto_target_file = file_path  # Save current file
-                                            self._goto_mode_active = True
-                                            
-                                            print(f"\n[goto] Fast-forwarding to line {actual_target} (target: {target_line})...\n", flush=True)
-                                            
-                                            # Start stepping immediately
-                                            should_step_after = True
-                                            break
-                                        else:
-                                            print(f"\n[goto] No executable line found near {target_line}\n", flush=True)
-                                            should_step_after = False
-                                            continue
+                                            if alternatives and self._tts:
+                                                msg = f"Line {target_line} is not executable. "
+                                                if line_before and line_after:
+                                                    msg += f"Press 0 for line {line_before}, 1 for line {line_after}, or escape to cancel"
+                                                elif line_before:
+                                                    msg += f"Press 0 for line {line_before}, or escape to cancel"
+                                                elif line_after:
+                                                    msg += f"Press 1 for line {line_after}, or escape to cancel"
+                                                
+                                                self._tts.speak(msg)
+                                                self._wait_for_speech_with_interrupt()
+                                                
+                                                # Wait for selection
+                                                if self._controller:
+                                                    selection = self._controller.wait_for_action(10.0)  # 10 second timeout
+                                                    if selection == '0' and line_before:
+                                                        target_line = line_before
+                                                    elif selection == '1' and line_after:
+                                                        target_line = line_after
+                                                    elif selection == 'stop_audio' or selection == 'escape':
+                                                        # Cancel goto
+                                                        print("\n[goto] Cancelled\n", flush=True)
+                                                        should_step_after = False
+                                                        continue
+                                                    else:
+                                                        # No valid selection, cancel
+                                                        print("\n[goto] No selection made, cancelled\n", flush=True)
+                                                        should_step_after = False
+                                                        continue
+                                            elif not alternatives:
+                                                print(f"\n[goto] Line {target_line} is not executable and no alternatives found\n", flush=True)
+                                                should_step_after = False
+                                                continue
+                                        
+                                        # Now proceed with the goto
+                                        # Save current audio state and mute
+                                        if self._controller and hasattr(self._controller, 'is_audio_enabled'):
+                                            self._audio_state_before_goto = self._controller.is_audio_enabled()
+                                            # Temporarily disable audio for fast-forward
+                                            if self._controller and hasattr(self._controller, 'set_audio_state'):
+                                                self._controller.set_audio_state(enabled=False, available=True)
+                                        
+                                        # Stop any current audio
+                                        if self._tts:
+                                            self._tts.stop()
+                                        
+                                        # Set goto mode
+                                        self._goto_target_line = target_line
+                                        self._goto_target_file = file_path  # Save current file
+                                        self._goto_mode_active = True
+                                        
+                                        print(f"\n[goto] Fast-forwarding to line {target_line}...\n", flush=True)
+                                        
+                                        # Start stepping immediately
+                                        should_step_after = True
+                                        break
                                     except (ValueError, IndexError):
                                         print("\n[goto] Invalid line number\n", flush=True)
                                         should_step_after = False
