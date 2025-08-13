@@ -200,7 +200,7 @@ class DapClient:
                 dm = self._responses.pop(seq, None)
             if dm is not None:
                 return dm
-            time.sleep(0.01)
+            time.sleep(0.001)  # Reduced from 10ms to 1ms for faster stepping
         raise TimeoutError(f"Timed out waiting for DAP response seq={seq}")
 
     def request(self, command: str, arguments: Optional[Dict[str, Any]] = None, wait: float = 10.0) -> DapMessage:

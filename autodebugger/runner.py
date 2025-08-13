@@ -228,7 +228,7 @@ class AutoDebugger:
         while self._tts.is_speaking():
             # Check for stop_audio action if controller is available
             if self._controller:
-                action = self._controller.wait_for_action(0.05)
+                action = self._controller.wait_for_action(0.005)  # Reduced from 50ms to 5ms for faster response
                 if action:
                     act = action.strip().lower()
                     # If explicit stop, or any other action (like a new selection), halt current speech
@@ -899,11 +899,8 @@ class AutoDebugger:
                 events = client.pop_events()
                 # If nothing arrived, small sleep to avoid spin
                 if not events:
-                    # Use shorter delay in skip modes for speed
-                    if self._goto_mode_active or self._skip_to_next_file_mode:
-                        time.sleep(0.001)  # 1ms in skip modes
-                    else:
-                        time.sleep(0.01)  # 10ms normally
+                    # Use minimal delay for faster response
+                    time.sleep(0.001)  # 1ms for faster stepping
                     continue
                 for ev in events:
                     if ev.event == "initialized":
