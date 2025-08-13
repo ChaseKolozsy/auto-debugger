@@ -1329,6 +1329,7 @@ class AutoDebugger:
                                         page_size = 10
                                         exploring = True
                                         announce_list = True  # Flag to control list announcement
+                                        instructions_spoken = False  # Speak navigation hints only once per session
                                         while exploring:
                                             # Handle scope selection first if needed
                                             if scope_mode == 'select' and active_vars is None:
@@ -1409,16 +1410,18 @@ class AutoDebugger:
                                                     actual_value = value["_parsed"] if isinstance(value, dict) and "_parsed" in value else value
                                                     brief_value = format_nested_value_summary(actual_value)
                                                     self._tts.speak(f"{i}: {var_name} — {brief_value}", interrupt=True, is_code=True)
-                                                if end_idx < len(active_vars):
-                                                    if page > 0:
-                                                        self._tts.speak("Press 0 to 9 to explore, N for next page, P for previous, Q to quit", interrupt=True)
+                                                if not instructions_spoken:
+                                                    if end_idx < len(active_vars):
+                                                        if page > 0:
+                                                            self._tts.speak("Press 0 to 9 to explore, N for next page, P for previous, Q to quit", interrupt=True)
+                                                        else:
+                                                            self._tts.speak("Press 0 to 9 to explore, N for next page, Q to quit", interrupt=True)
                                                     else:
-                                                        self._tts.speak("Press 0 to 9 to explore, N for next page, Q to quit", interrupt=True)
-                                                else:
-                                                    if page > 0:
-                                                        self._tts.speak("Press 0 to 9 to explore, P for previous page, Q to quit", interrupt=True)
-                                                    else:
-                                                        self._tts.speak("Press 0 to 9 to explore, Q to quit", interrupt=True)
+                                                        if page > 0:
+                                                            self._tts.speak("Press 0 to 9 to explore, P for previous page, Q to quit", interrupt=True)
+                                                        else:
+                                                            self._tts.speak("Press 0 to 9 to explore, Q to quit", interrupt=True)
+                                                    instructions_spoken = True
                                                 announce_list = False  # Don't announce again until page changes
 
                                             # Await selection
@@ -1536,6 +1539,7 @@ class AutoDebugger:
                                         page_size = 10
                                         exploring = True
                                         announce_list = True  # Flag to control list announcement
+                                        instructions_spoken = False  # Speak navigation hints only once per session
                                         while exploring:
                                             # Handle scope selection first if needed
                                             if scope_mode == 'select' and active_vars is None:
@@ -1614,16 +1618,18 @@ class AutoDebugger:
                                                     # Value is already parsed/fetched - use directly
                                                     brief_value = format_nested_value_summary(value)
                                                     self._tts.speak(f"{i}: {var_name} — {brief_value}", interrupt=True, is_code=True)
-                                                if end_idx < len(active_vars):
-                                                    if page > 0:
-                                                        self._tts.speak("Press 0 to 9 to explore, N for next page, P for previous, Q to quit", interrupt=True)
+                                                if not instructions_spoken:
+                                                    if end_idx < len(active_vars):
+                                                        if page > 0:
+                                                            self._tts.speak("Press 0 to 9 to explore, N for next page, P for previous, Q to quit", interrupt=True)
+                                                        else:
+                                                            self._tts.speak("Press 0 to 9 to explore, N for next page, Q to quit", interrupt=True)
                                                     else:
-                                                        self._tts.speak("Press 0 to 9 to explore, N for next page, Q to quit", interrupt=True)
-                                                else:
-                                                    if page > 0:
-                                                        self._tts.speak("Press 0 to 9 to explore, P for previous page, Q to quit", interrupt=True)
-                                                    else:
-                                                        self._tts.speak("Press 0 to 9 to explore, Q to quit", interrupt=True)
+                                                        if page > 0:
+                                                            self._tts.speak("Press 0 to 9 to explore, P for previous page, Q to quit", interrupt=True)
+                                                        else:
+                                                            self._tts.speak("Press 0 to 9 to explore, Q to quit", interrupt=True)
+                                                    instructions_spoken = True
                                                 announce_list = False  # Don't announce again until page changes
 
                                             # Await selection
