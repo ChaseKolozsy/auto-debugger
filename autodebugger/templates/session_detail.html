@@ -322,6 +322,7 @@
         <th>Line</th>
         <th>Code</th>
         <th>Variables</th>
+        <th>Resources</th>
         <th>Status</th>
         <th>Error</th>
         <th>When</th>
@@ -337,6 +338,9 @@
         data-status='{{ r.status }}'
         data-variables='{{ r.variables | tojson }}'
         data-delta='{{ r.variables_delta | tojson }}'
+        {% if r.loop_iteration %}data-loop-iteration='{{ r.loop_iteration }}'{% endif %}
+        {% if r.memory_usage_mb %}data-memory-mb='{{ r.memory_usage_mb }}'{% endif %}
+        {% if r.disk_usage_increase_mb %}data-disk-mb='{{ r.disk_usage_increase_mb }}'{% endif %}
         {% if r.function %}data-func='{{ r.function }}'{% endif %}
         {% if r.function_signature %}data-function_signature='{{ r.function_signature | replace("'", "&#39;") | replace('"', '&quot;') | replace("\n", "\\n") }}'{% endif %}
         {% if r.function_body %}data-function_body='{{ r.function_body | replace("'", "&#39;") | replace('"', '&quot;') | replace("\n", "\\n") }}'{% endif %}
@@ -351,6 +355,17 @@
               <summary>view</summary>
               <pre style="white-space: pre-wrap;">{{ r.variables | tojson(indent=2) }}</pre>
             </details>
+          {% endif %}
+        </td>
+        <td style="font-size: 12px;">
+          {% if r.loop_iteration %}
+            <span class="pill" style="background: #dbeafe; color: #1e3a8a;">Loop: {{r.loop_iteration}}</span>
+          {% endif %}
+          {% if r.memory_usage_mb %}
+            <span class="pill" style="background: #f3e8ff; color: #6b21a8;">Mem: {{r.memory_usage_mb|round(1)}}MB</span>
+          {% endif %}
+          {% if r.disk_usage_increase_mb %}
+            <span class="pill" style="background: #fef3c7; color: #92400e;">Disk: +{{r.disk_usage_increase_mb|round(1)}}MB</span>
           {% endif %}
         </td>
         <td>

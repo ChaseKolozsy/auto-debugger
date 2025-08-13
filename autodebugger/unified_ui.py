@@ -224,7 +224,8 @@ class UnifiedReviewInterface:
         cur = conn.cursor()
         cur.execute("""
             SELECT id, file, line_number, code, timestamp, variables, variables_delta, 
-                   status, error_message, error_type, stack_depth, thread_id
+                   status, error_message, error_type, stack_depth, thread_id,
+                   loop_iteration, memory_usage_mb, disk_usage_increase_mb
             FROM line_reports
             WHERE session_id=?
             ORDER BY id ASC
@@ -395,6 +396,20 @@ class UnifiedReviewInterface:
             
             while self.tts.is_speaking():
                 time.sleep(0.05)
+            
+            # Announce resource usage if available
+            resource_info = []
+            if rec.get("loop_iteration") is not None:
+                resource_info.append(f"Loop iteration {rec['loop_iteration']}")
+            if rec.get("memory_usage_mb") is not None:
+                resource_info.append(f"Memory {rec['memory_usage_mb']:.1f} megabytes")
+            if rec.get("disk_usage_increase_mb") is not None:
+                resource_info.append(f"Disk increase {rec['disk_usage_increase_mb']:.1f} megabytes")
+            
+            if resource_info:
+                self.tts.speak(f"Resources: {', '.join(resource_info)}")
+                while self.tts.is_speaking():
+                    time.sleep(0.05)
             
             # Handle errors
             if status == "error" and err:
