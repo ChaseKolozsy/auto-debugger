@@ -109,8 +109,16 @@ class AutoDebugger:
             # Check for stop_audio action if controller is available
             if self._controller:
                 action = self._controller.wait_for_action(0.05)
-                if action and action.strip().lower() == 'stop_audio':
+                if action:
+                    act = action.strip().lower()
+                    # If explicit stop, or any other action (like a new selection), halt current speech
                     self._tts.stop()
+                    # Re-queue non-stop actions so outer loop can process them
+                    if act != 'stop_audio' and hasattr(self._controller, 'shared_state'):
+                        try:
+                            self._controller.shared_state.send_action(action)
+                        except Exception:
+                            pass
                     return False
             else:
                 time.sleep(0.05)
@@ -1186,6 +1194,7 @@ class AutoDebugger:
                                                         # Stop any current audio before starting new selection
                                                         if self._tts:
                                                             self._tts.stop()
+                                                        # Speak block; if interrupted by another action, allow outer loop to handle it
                                                         explorer.speak_block(block)
                                                         # Keep popup open for further selections
                                                         _update_blocks_popup()
