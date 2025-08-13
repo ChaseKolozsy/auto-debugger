@@ -1063,8 +1063,8 @@ class AutoDebugger:
                                     self.db.end_session(self.session_id, utc_now_iso())
                                     return self.session_id
                         
-                        # Loop iteration tracking for resource management
-                        if max_loop_iterations is not None:
+                        # Loop iteration tracking for resource management and recording
+                        if max_loop_iterations is not None or record_resources:
                             current_location = (file_path, line)
                             stripped_code = code.strip()
                             
@@ -1084,8 +1084,8 @@ class AutoDebugger:
                                     # We're revisiting this loop header (another iteration)
                                     loop_iteration_counts[current_location] += 1
                                     
-                                    # Check if we've exceeded max iterations
-                                    if loop_iteration_counts[current_location] > max_iterations:
+                                    # Check if we've exceeded max iterations (only if limit is set)
+                                    if max_loop_iterations is not None and loop_iteration_counts[current_location] > max_iterations:
                                         error_msg = f"Loop at {os.path.basename(file_path)}:{line} exceeded maximum iterations ({max_iterations})"
                                         print(f"\n[RESOURCE LIMIT] {error_msg}\n", flush=True)
                                         
