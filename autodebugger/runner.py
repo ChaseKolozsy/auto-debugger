@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import psutil
 import re
 import select
 import shlex
@@ -473,12 +474,15 @@ class AutoDebugger:
         manual_voice: Optional[str] = None,
         manual_rate_wpm: int = 210,
         max_loop_iterations: Optional[int] = None,
+        max_memory_mb: Optional[int] = None,
     ) -> str:
         script_abs = os.path.abspath(script_path)
         
         # Debug output for resource management
         if max_loop_iterations is not None:
             print(f"[DEBUG] Max loop iterations set to: {max_loop_iterations}", file=sys.stderr, flush=True)
+        if max_memory_mb is not None:
+            print(f"[DEBUG] Max memory usage set to: {max_memory_mb} MB", file=sys.stderr, flush=True)
         
         # Parse manual_from trigger
         manual_trigger_file: Optional[str] = None
@@ -580,6 +584,22 @@ class AutoDebugger:
         loop_entry_tracking: Dict[Tuple[str, int], bool] = {}  # Track if we're inside a loop
         loop_stack: List[Tuple[str, int]] = []  # Stack of nested loops
         max_iterations = max_loop_iterations if max_loop_iterations else float('inf')
+        
+        # Memory tracking for resource management
+        process_pid: Optional[int] = None  # PID of the debugged process
+        max_memory_bytes = (max_memory_mb * 1024 * 1024) if max_memory_mb else float('inf')
+        
+        def get_process_memory_usage() -> Optional[float]:
+            """Get memory usage of the debugged process in bytes."""
+            if process_pid is None:
+                return None
+            try:
+                process = psutil.Process(process_pid)
+                # Get RSS (Resident Set Size) - actual physical memory usage
+                mem_info = process.memory_info()
+                return mem_info.rss
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                return None
 
         self.db.open()
         self.db.create_session(
@@ -870,6 +890,13 @@ class AutoDebugger:
                     if ev.event == "initialized":
                         # ignore; already launched
                         continue
+                    if ev.event == "process":
+                        # Extract process PID for memory monitoring
+                        if ev.body and "systemProcessId" in ev.body:
+                            process_pid = ev.body.get("systemProcessId")
+                            if process_pid and max_memory_mb:
+                                print(f"[DEBUG] Monitoring process PID {process_pid} for memory usage", file=sys.stderr, flush=True)
+                        continue
                     if ev.event == "stopped":
                         thread_id = int(ev.body.get("threadId")) if ev.body else 0
                         reason = ev.body.get("reason") if ev.body else ""
@@ -972,6 +999,25 @@ class AutoDebugger:
                         except Exception:
                             code = ""
 
+                        # Memory usage check for resource management
+                        if max_memory_mb is not None and process_pid is not None:
+                            current_memory = get_process_memory_usage()
+                            if current_memory is not None:
+                                current_memory_mb = current_memory / (1024 * 1024)
+                                if current_memory > max_memory_bytes:
+                                    error_msg = f"Process memory usage ({current_memory_mb:.1f} MB) exceeded limit ({max_memory_mb} MB)"
+                                    print(f"\n[RESOURCE LIMIT] {error_msg}\n", flush=True)
+                                    
+                                    # Abort debug session
+                                    try:
+                                        client.request("disconnect", {"terminateDebuggee": True}, wait=2.0)
+                                    except Exception:
+                                        pass
+                                    
+                                    # Record in database
+                                    self.db.end_session(self.session_id, utc_now_iso())
+                                    return self.session_id
+                        
                         # Loop iteration tracking for resource management
                         if max_loop_iterations is not None:
                             current_location = (file_path, line)
@@ -984,7 +1030,6 @@ class AutoDebugger:
                             )
                             
                             if is_loop_header:
-                                print(f"[LOOP DEBUG] Found loop at {os.path.basename(file_path)}:{line}: {stripped_code[:50]}", file=sys.stderr, flush=True)
                                 # We're at a loop header
                                 if current_location not in loop_iteration_counts:
                                     # First time seeing this loop
