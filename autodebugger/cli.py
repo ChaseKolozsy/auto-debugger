@@ -38,6 +38,7 @@ def main() -> None:  # pragma: no cover
 @click.option("--manual-rate", "manual_rate_wpm", type=int, default=210, show_default=True, help="Speech rate for manual audio mode.")
 @click.option("--max-loop-iterations", "max_loop_iterations", type=int, default=None, help="Maximum iterations allowed in a loop before aborting (resource management).")
 @click.option("--max-memory-mb", "max_memory_mb", type=int, default=None, help="Maximum memory usage in MB before aborting (resource management).")
+@click.option("--max-disk-usage-mb", "max_disk_usage_mb", type=int, default=None, help="Maximum disk usage increase in MB before aborting (resource management).")
 @click.argument("script", type=click.Path(exists=True))
 @click.argument("script_args", nargs=-1)
 def run_cmd(
@@ -53,10 +54,11 @@ def run_cmd(
     manual_rate_wpm: int,
     max_loop_iterations: Optional[int],
     max_memory_mb: Optional[int],
+    max_disk_usage_mb: Optional[int],
     script: str,
     script_args: tuple[str, ...],
 ) -> None:
-    print(f"[CLI DEBUG] Starting with max_loop_iterations={max_loop_iterations}, max_memory_mb={max_memory_mb}", file=sys.stderr, flush=True)
+    print(f"[CLI DEBUG] Starting with max_loop_iterations={max_loop_iterations}, max_memory_mb={max_memory_mb}, max_disk_usage_mb={max_disk_usage_mb}", file=sys.stderr, flush=True)
     dbg = AutoDebugger(python_exe=python_exe, db_path=db_path)
     session_id = dbg.run(
         script,
@@ -71,6 +73,7 @@ def run_cmd(
         manual_rate_wpm=manual_rate_wpm,
         max_loop_iterations=max_loop_iterations,
         max_memory_mb=max_memory_mb,
+        max_disk_usage_mb=max_disk_usage_mb,
     )
     click.echo(session_id)
 

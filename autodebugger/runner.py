@@ -475,6 +475,7 @@ class AutoDebugger:
         manual_rate_wpm: int = 210,
         max_loop_iterations: Optional[int] = None,
         max_memory_mb: Optional[int] = None,
+        max_disk_usage_mb: Optional[int] = None,
     ) -> str:
         script_abs = os.path.abspath(script_path)
         
@@ -483,6 +484,8 @@ class AutoDebugger:
             print(f"[DEBUG] Max loop iterations set to: {max_loop_iterations}", file=sys.stderr, flush=True)
         if max_memory_mb is not None:
             print(f"[DEBUG] Max memory usage set to: {max_memory_mb} MB", file=sys.stderr, flush=True)
+        if max_disk_usage_mb is not None:
+            print(f"[DEBUG] Max disk usage increase set to: {max_disk_usage_mb} MB", file=sys.stderr, flush=True)
         
         # Parse manual_from trigger
         manual_trigger_file: Optional[str] = None
@@ -599,6 +602,19 @@ class AutoDebugger:
                 mem_info = process.memory_info()
                 return mem_info.rss
             except (psutil.NoSuchProcess, psutil.AccessDenied):
+                return None
+        
+        # Disk usage tracking for resource management
+        max_disk_usage_bytes = (max_disk_usage_mb * 1024 * 1024) if max_disk_usage_mb else float('inf')
+        initial_disk_usage: Optional[int] = None
+        
+        def get_disk_usage() -> Optional[int]:
+            """Get current disk usage of the working directory in bytes."""
+            try:
+                # Get disk usage of the current working directory
+                usage = psutil.disk_usage(os.getcwd())
+                return usage.used
+            except Exception:
                 return None
 
         self.db.open()
@@ -896,6 +912,12 @@ class AutoDebugger:
                             process_pid = ev.body.get("systemProcessId")
                             if process_pid and max_memory_mb:
                                 print(f"[DEBUG] Monitoring process PID {process_pid} for memory usage", file=sys.stderr, flush=True)
+                            
+                            # Initialize disk usage tracking
+                            if max_disk_usage_mb:
+                                initial_disk_usage = get_disk_usage()
+                                if initial_disk_usage:
+                                    print(f"[DEBUG] Initial disk usage: {initial_disk_usage / (1024 * 1024):.1f} MB", file=sys.stderr, flush=True)
                         continue
                     if ev.event == "stopped":
                         thread_id = int(ev.body.get("threadId")) if ev.body else 0
@@ -1006,6 +1028,26 @@ class AutoDebugger:
                                 current_memory_mb = current_memory / (1024 * 1024)
                                 if current_memory > max_memory_bytes:
                                     error_msg = f"Process memory usage ({current_memory_mb:.1f} MB) exceeded limit ({max_memory_mb} MB)"
+                                    print(f"\n[RESOURCE LIMIT] {error_msg}\n", flush=True)
+                                    
+                                    # Abort debug session
+                                    try:
+                                        client.request("disconnect", {"terminateDebuggee": True}, wait=2.0)
+                                    except Exception:
+                                        pass
+                                    
+                                    # Record in database
+                                    self.db.end_session(self.session_id, utc_now_iso())
+                                    return self.session_id
+                        
+                        # Disk usage check for resource management
+                        if max_disk_usage_mb is not None and initial_disk_usage is not None:
+                            current_disk_usage = get_disk_usage()
+                            if current_disk_usage is not None:
+                                disk_increase = current_disk_usage - initial_disk_usage
+                                disk_increase_mb = disk_increase / (1024 * 1024)
+                                if disk_increase > max_disk_usage_bytes:
+                                    error_msg = f"Disk usage increase ({disk_increase_mb:.1f} MB) exceeded limit ({max_disk_usage_mb} MB)"
                                     print(f"\n[RESOURCE LIMIT] {error_msg}\n", flush=True)
                                     
                                     # Abort debug session
