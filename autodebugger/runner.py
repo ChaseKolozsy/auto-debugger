@@ -1066,21 +1066,25 @@ class AutoDebugger:
                                         self._tts.speak(msg)
                                         self._wait_for_speech_with_interrupt()
                             
-                            # Loop while at this stopped event to allow multiple actions (skip in goto mode)
-                            while not self._goto_mode_active:
-                                # Wait for user action
-                                action = None
-                                if self._controller:
-                                    # Indicate waiting in UI
-                                    self._controller.update_state(waiting=True)
-                                    while action is None:
-                                        action = self._controller.wait_for_action(0.5)
-                                        if self._abort_requested:
-                                            action = 'quit'
-                                            break
+                            # Loop while at this stopped event to allow multiple actions
+                            while True:
+                                # If in goto mode, skip user interaction and just step
+                                if self._goto_mode_active:
+                                    action = 'step'  # Simulate pressing Enter
                                 else:
-                                    # Terminal interface
-                                    action = prompt_for_action()
+                                    # Wait for user action
+                                    action = None
+                                    if self._controller:
+                                        # Indicate waiting in UI
+                                        self._controller.update_state(waiting=True)
+                                        while action is None:
+                                            action = self._controller.wait_for_action(0.5)
+                                            if self._abort_requested:
+                                                action = 'quit'
+                                                break
+                                    else:
+                                        # Terminal interface
+                                        action = prompt_for_action()
                                 
                                 # Update controller state
                                 if self._controller:
