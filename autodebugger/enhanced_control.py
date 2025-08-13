@@ -552,6 +552,7 @@ class StepControlHandler(BaseHTTPRequestHandler):
                     <li><b>m</b> - Toggle audio mute/unmute</li>
                     <li><b>s</b> - Cycle speech speed (slow/medium/fast)</li>
                     <li><b>l</b> - Go to line number</li>
+                    <li><b>t</b> - Skip to next file/script</li>
                 </ul>
             </div>
         </div>
@@ -940,6 +941,10 @@ class StepControlHandler(BaseHTTPRequestHandler):
                     // Send a check request first to validate the line
                     sendAction('goto:' + lineNum);
                 }
+            } else if (e.key === 't' || e.key === 'T') {
+                e.preventDefault();
+                // Skip to next file
+                sendAction('skip_to_next_file');
             } else if (e.key >= '0' && e.key <= '9') {
                 // Selection in explore mode
                 sendAction(e.key);
@@ -1063,7 +1068,7 @@ class HttpStepController:
 
 def prompt_for_action(timeout: Optional[float] = None) -> Optional[str]:
     """Prompt user for manual stepping action via stdin."""
-    print("\n[manual] Enter=step, v=vars, f=function, e=explore, a=auto, c=continue, q=quit: ", end='', flush=True)
+    print("\n[manual] Enter=step, v=vars, f=function, e=explore, t=next-file, a=auto, c=continue, q=quit: ", end='', flush=True)
     
     if timeout is not None:
         # Use select for timeout on Unix-like systems
@@ -1093,6 +1098,8 @@ def prompt_for_action(timeout: Optional[float] = None) -> Optional[str]:
             return 'quit'
         elif response in ['p', 'parts']:
             return 'parts'
+        elif response in ['t', 'next-file', 'skip']:
+            return 'skip_to_next_file'
         else:
             return 'step'  # Default to step
     except (EOFError, KeyboardInterrupt):

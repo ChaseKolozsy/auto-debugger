@@ -171,6 +171,8 @@ class AutoDebugger:
         self._goto_target_file: Optional[str] = None  # Target file for goto mode
         self._goto_mode_active: bool = False  # Whether we're fast-forwarding to a line
         self._audio_state_before_goto: bool = False  # To restore audio state after goto
+        self._skip_to_next_file_mode: bool = False  # Skip to next file mode
+        self._skip_from_file: Optional[str] = None  # Original file we're skipping from
 
     def _find_free_port(self) -> int:
         with socket.socket() as s:
@@ -487,7 +489,16 @@ class AutoDebugger:
         manual_mode_active = manual and not manual_from  # Start in manual if no trigger
         exploration_instructions_given = False  # Track if we've given exploration instructions
         
-        # Initialize TTS first if audio is enabled
+        # Set up web controller first if enabled (so browser opens before audio)
+        if manual_web:
+            # We'll pass TTS later if available
+            self._controller = HttpStepController()
+            self._controller.start()  # This opens the browser
+            # Set initial audio state if controller supports it
+            if hasattr(self._controller, 'set_audio_state'):
+                self._controller.set_audio_state(enabled=manual_audio, available=manual_audio)
+        
+        # Initialize TTS after web controller (so browser opens first)
         if manual_audio:
             self._tts = MacSayTTS(voice=manual_voice, rate_wpm=manual_rate_wpm, verbose=False)
             # Initialize nested explorer for interactive variable exploration
@@ -510,22 +521,8 @@ class AutoDebugger:
                 self._tts.speak("Manual mode. Press V for variables, F for function, P for function parts, E to explore changes")
                 self._wait_for_speech_with_interrupt()
                 exploration_instructions_given = True
-        
-        if manual_web:
-            # Pass TTS instance to controller if available (enhanced controller only)
-            if USE_ENHANCED and self._tts:
-                try:
-                    self._controller = HttpStepController(tts=self._tts)
-                except TypeError:
-                    # Fallback to no tts parameter if using simple controller
-                    self._controller = HttpStepController()
-            else:
-                self._controller = HttpStepController()
-            self._controller.start()
-            # Set initial audio state if controller supports it
-            if hasattr(self._controller, 'set_audio_state'):
-                self._controller.set_audio_state(enabled=manual_audio, available=manual_audio)
-            # If we have a nested explorer and a controller, wire an action provider for web inputs
+            
+            # Wire up controller if we have both
             if self._nested_explorer and self._controller:
                 def _provider() -> Optional[str]:
                     return self._controller.wait_for_action(0.1)
@@ -853,6 +850,22 @@ class AutoDebugger:
                                 
                                 # Continue normally from here
                             # Keep stepping until we hit the target line
+                        
+                        # Check if we've reached a different file (skip-to-next-file mode)
+                        if self._skip_to_next_file_mode and self._skip_from_file:
+                            if file_path != self._skip_from_file:
+                                # We've reached a different file
+                                print(f"\n[skip] Reached different file: {os.path.basename(file_path)}\n", flush=True)
+                                
+                                # Restore audio state
+                                if self._controller and hasattr(self._controller, 'set_audio_state'):
+                                    self._controller.set_audio_state(enabled=self._audio_state_before_goto, available=True)
+                                
+                                # Clear skip mode
+                                self._skip_to_next_file_mode = False
+                                self._skip_from_file = None
+                                
+                                # Continue normally from here
 
                         # Snapshot the file content the first time we encounter it in this session
                         # This ensures the UI can fetch function details from the exact source that ran,
@@ -988,16 +1001,17 @@ class AutoDebugger:
                         )
                         
                         # Handle manual stepping
-                        if manual_mode_active and self._goto_mode_active:
-                            # In goto mode - skip ALL interaction and just step
+                        if manual_mode_active and (self._goto_mode_active or self._skip_to_next_file_mode):
+                            # In goto or skip-to-next-file mode - skip ALL interaction and just step
                             if self._controller:
+                                mode_str = 'goto' if self._goto_mode_active else 'skip'
                                 self._controller.update_state(
                                     session_id=self.session_id,
                                     file=file_path,
                                     line=line,
                                     code=code,
                                     waiting=False,
-                                    mode='goto'
+                                    mode=mode_str
                                 )
                             # Force stepping without any user interaction
                             should_step_after = True
@@ -1214,6 +1228,28 @@ class AutoDebugger:
                                         print("\n[goto] Invalid line number\n", flush=True)
                                         should_step_after = False
                                         continue
+                                elif action == 'skip_to_next_file':
+                                    # Skip to next file/script
+                                    # Save current audio state and mute
+                                    if self._controller and hasattr(self._controller, 'is_audio_enabled'):
+                                        self._audio_state_before_goto = self._controller.is_audio_enabled()
+                                        # Temporarily disable audio for fast-forward
+                                        if self._controller and hasattr(self._controller, 'set_audio_state'):
+                                            self._controller.set_audio_state(enabled=False, available=True)
+                                    
+                                    # Stop any current audio
+                                    if self._tts:
+                                        self._tts.stop()
+                                    
+                                    # Set skip mode
+                                    self._skip_to_next_file_mode = True
+                                    self._skip_from_file = file_path  # Save current file
+                                    
+                                    print(f"\n[skip] Fast-forwarding to next file (from {os.path.basename(file_path)})...\n", flush=True)
+                                    
+                                    # Start stepping immediately
+                                    should_step_after = True
+                                    break
                                 elif action == 'stop_audio':
                                     # Stop any playing audio
                                     if self._tts:
