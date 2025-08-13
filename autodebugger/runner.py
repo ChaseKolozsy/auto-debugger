@@ -1190,34 +1190,26 @@ class AutoDebugger:
                                                         # Keep popup open for further selections
                                                         _update_blocks_popup()
                                                     else:
+                                                        # No code assigned to this index on current page
                                                         if self._tts:
                                                             self._tts.stop()
-                                                        self._tts.speak("Invalid block number")
-                                                        self._wait_for_speech_with_interrupt()
+                                                            self._tts.speak("No Code")
                                                 
                                                 elif block_action in ['n', 'next']:
                                                     # Next page
-                                                    if self._tts:
-                                                        self._tts.stop()
                                                     if explorer.next_page():
-                                                        self._tts.speak(explorer.announce_page_info())
-                                                        self._wait_for_speech_with_interrupt()
                                                         _update_blocks_popup()
                                                     else:
-                                                        self._tts.speak("Already at last page")
-                                                        self._wait_for_speech_with_interrupt()
+                                                        # No further page; stay silent
+                                                        pass
                                                 
                                                 elif block_action in ['prev', 'previous'] or (block_action == 'p' and not block_action.isdigit()):
                                                     # Previous page
-                                                    if self._tts:
-                                                        self._tts.stop()
                                                     if explorer.previous_page():
-                                                        self._tts.speak(explorer.announce_page_info())
-                                                        self._wait_for_speech_with_interrupt()
                                                         _update_blocks_popup()
                                                     else:
-                                                        self._tts.speak("Already at first page")
-                                                        self._wait_for_speech_with_interrupt()
+                                                        # No previous page; stay silent
+                                                        pass
                                                 
                                                 elif block_action in ['s', 'speed']:
                                                     # Change speed
