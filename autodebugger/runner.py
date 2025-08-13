@@ -937,29 +937,27 @@ class AutoDebugger:
                         )
                         
                         # Handle manual stepping
-                        if manual_mode_active:
-                            # If in goto mode, skip all interaction and just step
-                            if self._goto_mode_active:
-                                # Update controller state to show we're fast-forwarding
-                                if self._controller:
-                                    self._controller.update_state(
-                                        session_id=self.session_id,
-                                        file=file_path,
-                                        line=line,
-                                        code=code,
-                                        waiting=False,
-                                        mode='goto'
-                                    )
-                                # Don't wait for input, just step immediately
-                                should_step_after = True
-                            else:
-                                # Normal manual mode with user interaction
-                                # Update controller state
-                                if self._controller:
-                                    # Convert to display format for web view
-                                    display_vars = self._extract_display_values(vars_payload)
-                                    display_delta = self._extract_display_values(variables_delta) if variables_delta else {}
-                                    self._controller.update_state(
+                        if manual_mode_active and self._goto_mode_active:
+                            # In goto mode - skip ALL interaction and just step
+                            if self._controller:
+                                self._controller.update_state(
+                                    session_id=self.session_id,
+                                    file=file_path,
+                                    line=line,
+                                    code=code,
+                                    waiting=False,
+                                    mode='goto'
+                                )
+                            # Force stepping without any user interaction
+                            should_step_after = True
+                        elif manual_mode_active:
+                            # Normal manual mode with user interaction
+                            # Update controller state
+                            if self._controller:
+                                # Convert to display format for web view
+                                display_vars = self._extract_display_values(vars_payload)
+                                display_delta = self._extract_display_values(variables_delta) if variables_delta else {}
+                                self._controller.update_state(
                                         session_id=self.session_id,
                                         file=file_path,
                                         line=line,
@@ -1068,23 +1066,19 @@ class AutoDebugger:
                             
                             # Loop while at this stopped event to allow multiple actions
                             while True:
-                                # If in goto mode, skip user interaction and just step
-                                if self._goto_mode_active:
-                                    action = 'step'  # Simulate pressing Enter
+                                # Wait for user action
+                                action = None
+                                if self._controller:
+                                    # Indicate waiting in UI
+                                    self._controller.update_state(waiting=True)
+                                    while action is None:
+                                        action = self._controller.wait_for_action(0.5)
+                                        if self._abort_requested:
+                                            action = 'quit'
+                                            break
                                 else:
-                                    # Wait for user action
-                                    action = None
-                                    if self._controller:
-                                        # Indicate waiting in UI
-                                        self._controller.update_state(waiting=True)
-                                        while action is None:
-                                            action = self._controller.wait_for_action(0.5)
-                                            if self._abort_requested:
-                                                action = 'quit'
-                                                break
-                                    else:
-                                        # Terminal interface
-                                        action = prompt_for_action()
+                                    # Terminal interface
+                                    action = prompt_for_action()
                                 
                                 # Update controller state
                                 if self._controller:
