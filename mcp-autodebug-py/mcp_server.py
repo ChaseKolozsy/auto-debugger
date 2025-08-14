@@ -1143,7 +1143,8 @@ def analyze_variable_dependencies(
             """, (session_id,)).fetchone()
             
             if existing:
-                return get_dependency_graph(session_id, db)
+                # Return the existing analysis
+                return _get_dependency_graph_internal(session_id, None, 2, db)
     
     # Run the analysis
     sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -1160,26 +1161,13 @@ def analyze_variable_dependencies(
     except Exception as e:
         return {'error': f'Failed to analyze dependencies: {e}'}
 
-@mcp.tool
-def get_dependency_graph(
+def _get_dependency_graph_internal(
     session_id: str,
     variable_name: Optional[str] = None,
     depth: int = 2,
     db: Optional[str] = None
 ) -> Dict[str, Any]:
-    """
-    Query stored dependency graph data for a session.
-    Can get full graph or dependencies for a specific variable.
-    
-    Args:
-        session_id: The debugging session ID
-        variable_name: Optional - get dependencies for specific variable
-        depth: How many levels of dependencies to include (for specific variable)
-        db: Optional database path
-    
-    Returns:
-        Dependency graph data from the database
-    """
+    """Internal function to get dependency graph data."""
     db_path = get_db_path(db)
     
     with sqlite3.connect(db_path) as conn:
@@ -1269,6 +1257,28 @@ def get_dependency_graph(
             result['dependency_graph'] = graph
         
         return result
+
+@mcp.tool
+def get_dependency_graph(
+    session_id: str,
+    variable_name: Optional[str] = None,
+    depth: int = 2,
+    db: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Query stored dependency graph data for a session.
+    Can get full graph or dependencies for a specific variable.
+    
+    Args:
+        session_id: The debugging session ID
+        variable_name: Optional - get dependencies for specific variable
+        depth: How many levels of dependencies to include (for specific variable)
+        db: Optional database path
+    
+    Returns:
+        Dependency graph data from the database
+    """
+    return _get_dependency_graph_internal(session_id, variable_name, depth, db)
 
 def _get_dependency_chain(cursor, session_id: str, variable: str, depth: int, visited=None):
     """Recursively get dependency chain for a variable."""
