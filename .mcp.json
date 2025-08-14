@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "autodebug-py": {
+      "type": "stdio",
+      "command": "/opt/anaconda3/envs/aXaTT/bin/python",
+      "args": [
+        "/Users/neweyesiss/AutoClaude/aXaTT/submodules/auto-debugger/mcp-autodebug-py/mcp_server.py"
+      ],
+      "env": {}
+    }
+  }
+}
