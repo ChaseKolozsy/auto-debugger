@@ -763,65 +763,79 @@ def find_string_mutations(
             if not delta or scope not in delta:
                 continue
             
+            # Check for direct variable or instance variable (self.variable)
+            current_value = None
             if variable_name in delta[scope]:
                 current_value = delta[scope][variable_name]
+            elif 'self' in delta[scope] and isinstance(delta[scope]['self'], dict):
+                # Check for instance variables
+                if variable_name in delta[scope]['self']:
+                    current_value = delta[scope]['self'][variable_name]
+                # Also check if user passed "self.variable"
+                elif '.' in variable_name:
+                    parts = variable_name.split('.', 1)
+                    if parts[0] == 'self' and parts[1] in delta[scope]['self']:
+                        current_value = delta[scope]['self'][parts[1]]
+            
+            if current_value is None:
+                continue
                 
-                # Only track string values
-                if not isinstance(current_value, str):
-                    previous_value = current_value
-                    continue
-                
-                change_info = {
-                    'line_number': row['line_number'],
-                    'code': row['code'].strip(),
-                    'previous_value': previous_value,
-                    'new_value': current_value,
-                    'timestamp': row['timestamp']
-                }
-                
-                # Add diff analysis if requested and we have a previous string value
-                if show_diff and isinstance(previous_value, str):
-                    # Character-level diff
-                    diff = difflib.unified_diff(
-                        previous_value.splitlines(keepends=True),
-                        current_value.splitlines(keepends=True),
-                        lineterm=''
-                    )
-                    diff_text = ''.join(diff)
-                    
-                    # Analyze the type of change
-                    if previous_value.strip() == current_value:
-                        operation = 'whitespace_change'
-                    elif previous_value.lower() == current_value.lower():
-                        operation = 'case_change'
-                    elif current_value.startswith(previous_value):
-                        operation = 'append'
-                        change_info['appended'] = current_value[len(previous_value):]
-                    elif current_value.endswith(previous_value):
-                        operation = 'prepend'
-                        change_info['prepended'] = current_value[:-len(previous_value)]
-                    elif len(current_value) < len(previous_value):
-                        operation = 'truncation'
-                    elif len(current_value) > len(previous_value):
-                        operation = 'expansion'
-                    else:
-                        operation = 'replacement'
-                    
-                    change_info['operation'] = operation
-                    change_info['length_change'] = len(current_value) - len(previous_value)
-                    
-                    # Find common sequences
-                    matcher = difflib.SequenceMatcher(None, previous_value, current_value)
-                    change_info['similarity_ratio'] = matcher.ratio()
-                    
-                    if diff_text:
-                        change_info['diff'] = diff_text
-                
-                changes.append(change_info)
+            # Only track string values
+            if not isinstance(current_value, str):
                 previous_value = current_value
+                continue
+            
+            change_info = {
+                'line_number': row['line_number'],
+                'code': row['code'].strip(),
+                'previous_value': previous_value,
+                'new_value': current_value,
+                'timestamp': row['timestamp']
+            }
+            
+            # Add diff analysis if requested and we have a previous string value
+            if show_diff and isinstance(previous_value, str):
+                # Character-level diff
+                diff = difflib.unified_diff(
+                    previous_value.splitlines(keepends=True),
+                    current_value.splitlines(keepends=True),
+                    lineterm=''
+                )
+                diff_text = ''.join(diff)
                 
-                if len(changes) >= limit:
-                    break
+                # Analyze the type of change
+                if previous_value.strip() == current_value:
+                    operation = 'whitespace_change'
+                elif previous_value.lower() == current_value.lower():
+                    operation = 'case_change'
+                elif current_value.startswith(previous_value):
+                    operation = 'append'
+                    change_info['appended'] = current_value[len(previous_value):]
+                elif current_value.endswith(previous_value):
+                    operation = 'prepend'
+                    change_info['prepended'] = current_value[:-len(previous_value)]
+                elif len(current_value) < len(previous_value):
+                    operation = 'truncation'
+                elif len(current_value) > len(previous_value):
+                    operation = 'expansion'
+                else:
+                    operation = 'replacement'
+                
+                change_info['operation'] = operation
+                change_info['length_change'] = len(current_value) - len(previous_value)
+                
+                # Find common sequences
+                matcher = difflib.SequenceMatcher(None, previous_value, current_value)
+                change_info['similarity_ratio'] = matcher.ratio()
+                
+                if diff_text:
+                    change_info['diff'] = diff_text
+            
+            changes.append(change_info)
+            previous_value = current_value
+            
+            if len(changes) >= limit:
+                break
         
         return changes
 
@@ -870,45 +884,59 @@ def find_state_transitions(
             if not delta or scope not in delta:
                 continue
             
+            # Check for direct variable or instance variable (self.variable)
+            current_state = None
             if state_variable in delta[scope]:
                 current_state = delta[scope][state_variable]
+            elif 'self' in delta[scope] and isinstance(delta[scope]['self'], dict):
+                # Check for instance variables
+                if state_variable in delta[scope]['self']:
+                    current_state = delta[scope]['self'][state_variable]
+                # Also check if user passed "self.variable"
+                elif '.' in state_variable:
+                    parts = state_variable.split('.', 1)
+                    if parts[0] == 'self' and parts[1] in delta[scope]['self']:
+                        current_state = delta[scope]['self'][parts[1]]
+            
+            if current_state is None:
+                continue
+            
+            # Track state occurrence
+            state_counts[current_state] = state_counts.get(current_state, 0) + 1
+            
+            # Track transition
+            if previous_state is not None:
+                transition_key = f"{previous_state} -> {current_state}"
                 
-                # Track state occurrence
-                state_counts[current_state] = state_counts.get(current_state, 0) + 1
-                
-                # Track transition
-                if previous_state is not None:
-                    transition_key = f"{previous_state} -> {current_state}"
-                    
-                    if transition_key not in transition_graph:
-                        transition_graph[transition_key] = {
-                            'count': 0,
-                            'lines': []
-                        }
-                    
-                    transition_graph[transition_key]['count'] += 1
-                    transition_graph[transition_key]['lines'].append(row['line_number'])
-                    
-                    transition_info = {
-                        'line_number': row['line_number'],
-                        'code': row['code'].strip(),
-                        'from_state': previous_state,
-                        'to_state': current_state,
-                        'timestamp': row['timestamp']
+                if transition_key not in transition_graph:
+                    transition_graph[transition_key] = {
+                        'count': 0,
+                        'lines': []
                     }
-                    
-                    # Check if transition is valid
-                    if valid_states:
-                        if current_state not in valid_states:
-                            transition_info['invalid'] = True
-                            transition_info['reason'] = 'unknown_state'
-                        elif previous_state not in valid_states:
-                            transition_info['invalid'] = True
-                            transition_info['reason'] = 'invalid_source_state'
-                    
-                    transitions.append(transition_info)
                 
-                previous_state = current_state
+                transition_graph[transition_key]['count'] += 1
+                transition_graph[transition_key]['lines'].append(row['line_number'])
+                
+                transition_info = {
+                    'line_number': row['line_number'],
+                    'code': row['code'].strip(),
+                    'from_state': previous_state,
+                    'to_state': current_state,
+                    'timestamp': row['timestamp']
+                }
+                
+                # Check if transition is valid
+                if valid_states:
+                    if current_state not in valid_states:
+                        transition_info['invalid'] = True
+                        transition_info['reason'] = 'unknown_state'
+                    elif previous_state not in valid_states:
+                        transition_info['invalid'] = True
+                        transition_info['reason'] = 'invalid_source_state'
+                
+                transitions.append(transition_info)
+            
+            previous_state = current_state
         
         # Identify cycles
         cycles = []
@@ -1298,6 +1326,7 @@ def find_variable_influence(
     db_path = get_db_path(db)
     
     with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row  # Fix: Set row_factory
         cursor = conn.cursor()
         
         # Check if dependency data exists
